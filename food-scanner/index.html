@@ -762,7 +762,7 @@
     <div class="bcm-title">Scan barcode</div>
   </div>
   <div class="bcm-status" id="bcmStatus">Point camera at a barcode</div>
-  <button class="bcm-snap" id="bcmSnap" hidden>Tap to capture</button>
+  <button class="bcm-snap" id="bcmSnap">Take picture instead</button>
 </div>
 
 <script>
@@ -1138,6 +1138,26 @@ async function analyzePhotoDirectly(file) {
 // ===== Barcode-shot flow =====
 // User taps "Barcode" button → iOS opens native camera → user snaps the
 // barcode → we decode the resulting image.
+// Ask Claude (Haiku) to read the barcode digits from a photo when local
+// decoders fail. Cheap (~$0.001), fast, very accurate at OCR.
+async function ocrBarcodeWithClaude(file) {
+  try {
+    const compressed = await compressImage(file);
+    const { dataUrl } = compressed;
+    const { mime, base64 } = dataUrlToParts(dataUrl);
+    const resp = await fetch('/api/ocr-barcode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64, mime }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data.code || null;
+  } catch {
+    return null;
+  }
+}
+
 async function handleBarcodeShot(file) {
   if (!file) return;
   $('error').innerHTML = '';
@@ -1158,11 +1178,18 @@ async function handleBarcodeShot(file) {
     });
   } catch {}
 
+  // Local decoders couldn't read it — let Claude (Haiku, cheap) try the OCR
+  if (!code) {
+    $('status').innerHTML = '<span class="spinner"></span>Asking Claude to read the digits…';
+    code = await ocrBarcodeWithClaude(file);
+  }
+
   $('barcodeBtn').disabled = false;
   $('cameraBtn').disabled = false;
   $('status').innerHTML = '';
 
   if (!code) {
+    // Truly unreadable — last-resort manual entry
     showManualBarcodeEntry(file);
     return;
   }
@@ -1333,31 +1360,39 @@ function showError(msg) {
   $('error').innerHTML = `<div class="error">${escape(msg)}</div>`;
 }
 
-// ===== Live barcode scanner (html5-qrcode) =====
+
+// ===== Wire up =====
+// IMPORTANT: reset input value after every change so iOS re-fires the event
+// next time even if it thinks "the same" file was picked.
+function bindFileInput(inputId, handler) {
+  $(inputId).addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    e.target.value = ''; // reset so next selection fires change again on iOS
+    if (file) handler(file);
+  });
+}
+
+// ===== Live barcode scanner =====
 let html5Qr = null;
 let bcmActive = false;
-
-function setStep(text) { $('bcmStatus').textContent = text; }
+function setStep(text) { const el = $('bcmStatus'); if (el) el.textContent = text; }
 
 async function openBarcodeScanner() {
+  // If library isn't available, go straight to one-shot photo
   if (typeof Html5Qrcode === 'undefined') {
-    showError('Library still loading. Wait 2-3 seconds and try again, or pull down to refresh.');
+    $('barcodeInput').click();
     return;
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError('Camera access not supported in this browser.');
+    $('barcodeInput').click();
     return;
   }
 
   $('error').innerHTML = '';
   $('barcodeModal').hidden = false;
-  $('bcmSnap').hidden = true;
   setStep('Resetting…');
 
-  // === Aggressive cleanup of any previous scanner state ===
-  // iOS Safari is strict about camera handles; even after html5-qrcode's
-  // stop(), the underlying MediaStream can linger, blocking the next
-  // getUserMedia call. We kill every video track on the page to be safe.
+  // Aggressive cleanup of any previous scanner state
   bcmActive = false;
   if (html5Qr) {
     try {
@@ -1367,7 +1402,6 @@ async function openBarcodeScanner() {
     try { html5Qr.clear(); } catch {}
     html5Qr = null;
   }
-  // Stop every active video track on the page (catches html5-qrcode leaks)
   document.querySelectorAll('video').forEach((v) => {
     try {
       if (v.srcObject) {
@@ -1376,14 +1410,12 @@ async function openBarcodeScanner() {
       }
     } catch {}
   });
-  // Clear the container DOM completely
   const container = $('qrReader');
   if (container) container.innerHTML = '';
-  // Give iOS a beat to actually release the camera handle
-  await new Promise((r) => setTimeout(r, 350));
+  await new Promise((r) => setTimeout(r, 300));
 
   bcmActive = true;
-  setStep('1/3 · Loading scanner…');
+  setStep('Starting camera…');
 
   try {
     html5Qr = new Html5Qrcode('qrReader', {
@@ -1401,31 +1433,24 @@ async function openBarcodeScanner() {
     });
   } catch (e) {
     closeBarcodeModal();
-    showError('Setup error: ' + (e?.message || e?.name || String(e)));
+    showError('Setup error: ' + (e?.message || e?.name));
     return;
   }
-  // Re-arm bcmActive after potential stop above
-  bcmActive = true;
 
-  setStep('2/3 · Asking camera permission…');
+  const qrboxFn = (vw) => {
+    const w = Math.min(Math.round(vw * 0.78), 360);
+    return { width: w, height: Math.round(w * 0.5) };
+  };
 
   let attempts = 0;
   const startTime = Date.now();
-
-  // Compute a centered wide qrbox that matches the visual gold frame
-  function qrboxFn(viewW, viewH) {
-    const w = Math.min(Math.round(viewW * 0.78), 360);
-    const h = Math.round(w * 0.5); // wide rectangle (good for barcodes)
-    return { width: w, height: h };
-  }
 
   try {
     await html5Qr.start(
       { facingMode: 'environment' },
       {
-        fps: 15,                    // more aggressive than default 10
-        qrbox: qrboxFn,             // restrict scan to centered wide area
-        aspectRatio: undefined,
+        fps: 15,
+        qrbox: qrboxFn,
         disableFlip: true,
         videoConstraints: {
           facingMode: { ideal: 'environment' },
@@ -1433,45 +1458,36 @@ async function openBarcodeScanner() {
           height: { ideal: 1080 },
         },
       },
-      async (decodedText /*, decodedResult */) => {
+      async (decodedText) => {
         if (!bcmActive) return;
         const code = (decodedText || '').trim();
         if (!code) return;
-        bcmActive = false; // prevent further callbacks immediately
+        bcmActive = false;
         if (navigator.vibrate) navigator.vibrate(80);
         setStep('Got it: ' + code);
-        // Properly await teardown so the camera + DOM is fully released
-        // before we try to reopen later.
         await stopBarcodeScanner();
         $('barcodeModal').hidden = true;
-        $('bcmSnap').hidden = true;
-        handleBarcodeFound(code);
+        // Live scan has no original file to fall back to, pass null
+        await processBarcodeCode(code, null);
       },
-      (/* errorMessage */) => {
-        // Per-frame "not found" — normal, throttle the status update
+      () => {
         if (!bcmActive) return;
         attempts++;
         if (attempts % 15 === 0) {
           const sec = Math.round((Date.now() - startTime) / 1000);
-          let tip = 'hold 10-15cm away';
-          if (sec > 8) tip = 'try better light or steadier grip';
-          if (sec > 15) tip = 'tap snapshot button for manual capture';
-          setStep(`Scanning · ${sec}s · ${tip}`);
-          // After 15s, show the manual capture fallback button
-          if (sec > 15) $('bcmSnap').hidden = false;
+          setStep(`Scanning · ${sec}s · or tap "Take picture instead"`);
         }
       }
     );
-    setStep('3/3 · Scanning · hold steady over the barcode');
+    setStep('Point at a barcode');
   } catch (e) {
     closeBarcodeModal();
     const msg = e?.message || e?.name || String(e);
     if (/permission|denied|notallowed/i.test(msg)) {
       showError('Camera permission denied. iOS: Settings → Safari → Camera → Allow.');
-    } else if (/notfound|notreadable/i.test(msg)) {
-      showError('No rear camera available.');
     } else {
-      showError('Camera/scanner error: ' + msg);
+      showError('Camera error: ' + msg + ' — using picture mode instead.');
+      $('barcodeInput').click();
     }
   }
 }
@@ -1481,14 +1497,11 @@ async function stopBarcodeScanner() {
   if (html5Qr) {
     try {
       const state = html5Qr.getState && html5Qr.getState();
-      if (state === 2 || state === 3) {
-        await html5Qr.stop();
-      }
+      if (state === 2 || state === 3) await html5Qr.stop();
     } catch {}
     try { html5Qr.clear(); } catch {}
     html5Qr = null;
   }
-  // Belt-and-braces: kill any video stream tracks the library missed.
   document.querySelectorAll('video').forEach((v) => {
     try {
       if (v.srcObject) {
@@ -1502,147 +1515,20 @@ async function stopBarcodeScanner() {
 async function closeBarcodeModal() {
   await stopBarcodeScanner();
   $('barcodeModal').hidden = true;
-  $('bcmSnap').hidden = true;
-  // Clear the qrReader container DOM so next open is a clean slate
-  const container = $('qrReader');
-  if (container) container.innerHTML = '';
+  const c = $('qrReader');
+  if (c) c.innerHTML = '';
 }
 
-// Manual snapshot fallback — grab the current video frame and try harder
-async function manualSnapshot() {
-  if (!html5Qr) return;
-  setStep('Capturing frame…');
-
-  const videoEl = document.querySelector('#qrReader video');
-  if (!videoEl || videoEl.videoWidth === 0) {
-    setStep('No video to capture from.');
-    return;
-  }
-
-  // Grab the current frame to canvas → blob → File → scanFile
-  const canvas = document.createElement('canvas');
-  canvas.width = videoEl.videoWidth;
-  canvas.height = videoEl.videoHeight;
-  canvas.getContext('2d').drawImage(videoEl, 0, 0);
-
-  setStep('Decoding captured frame…');
-  await new Promise((resolve) => {
-    canvas.toBlob(async (blob) => {
-      if (!blob) { setStep('Capture failed.'); resolve(); return; }
-      const file = new File([blob], 'snap.jpg', { type: 'image/jpeg' });
-
-      // Pause the live scanner while we try a single hard decode
-      try { await html5Qr.pause(true); } catch {}
-
-      const code = await tryDetectBarcode(file);
-      if (code) {
-        bcmActive = false;
-        if (navigator.vibrate) navigator.vibrate(80);
-        setStep('Got it: ' + code);
-        await stopBarcodeScanner();
-        $('barcodeModal').hidden = true;
-        $('bcmSnap').hidden = true;
-        handleBarcodeFound(code);
-      } else {
-        setStep('Captured frame had no readable barcode. Try again.');
-        try { await html5Qr.resume(); } catch {}
-      }
-      resolve();
-    }, 'image/jpeg', 0.92);
-  });
+// "Take picture instead" — closes live mode, triggers iOS native camera shot
+async function fallbackToPicture() {
+  await closeBarcodeModal();
+  // Small delay so iOS releases camera before file input opens it
+  setTimeout(() => $('barcodeInput').click(), 300);
 }
 
-async function handleBarcodeFound(code) {
-  $('error').innerHTML = '';
-  $('result').innerHTML = '';
-  $('preview').innerHTML = `
-    <div class="bc-card">
-      <div class="bc-card-icon">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><rect x="2" y="4" width="2" height="16"/><rect x="5" y="4" width="1" height="16"/><rect x="7" y="4" width="3" height="16"/><rect x="11" y="4" width="1" height="16"/><rect x="13" y="4" width="2" height="16"/><rect x="16" y="4" width="3" height="16"/><rect x="20" y="4" width="2" height="16"/></svg>
-      </div>
-      <div class="bc-card-text">
-        <div class="bc-card-name">Barcode <span class="mono">${escape(code)}</span></div>
-        <div class="bc-card-meta">Looking up product…</div>
-      </div>
-    </div>`;
-  $('barcodeBtn').disabled = true;
-  $('cameraBtn').disabled = true;
-  $('status').innerHTML = '<span class="spinner"></span>Looking up product';
-
-  const productData = await lookupBarcode(code);
-  if (!productData) {
-    $('barcodeBtn').disabled = false;
-    $('cameraBtn').disabled = false;
-    $('status').innerHTML = '';
-    showError('Product ' + code + ' not found in Open Food Facts. Try the Photo button to scan the ingredient list.');
-    return;
-  }
-
-  // Update preview card with product info
-  $('preview').innerHTML = `
-    <div class="bc-card">
-      <div class="bc-card-icon">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><rect x="2" y="4" width="2" height="16"/><rect x="5" y="4" width="1" height="16"/><rect x="7" y="4" width="3" height="16"/><rect x="11" y="4" width="1" height="16"/><rect x="13" y="4" width="2" height="16"/><rect x="16" y="4" width="3" height="16"/><rect x="20" y="4" width="2" height="16"/></svg>
-      </div>
-      <div class="bc-card-text">
-        <div class="bc-card-name">${escape(productData.name || 'Unknown product')}</div>
-        <div class="bc-card-meta">${productData.brand ? escape(productData.brand) + ' · ' : ''}${escape(code)}</div>
-      </div>
-    </div>`;
-
-  $('status').innerHTML = '<span class="spinner"></span>Reading the ingredients';
-
-  const noteVal = ($('noteInput').value || '').trim();
-  const payload = { portion: currentPortion, note: noteVal, productData };
-
-  let resp;
-  try {
-    resp = await fetch('/api/scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (e) {
-    showError('Network error: ' + e.message);
-    $('barcodeBtn').disabled = false;
-    $('cameraBtn').disabled = false;
-    $('status').innerHTML = '';
-    return;
-  }
-
-  $('barcodeBtn').disabled = false;
-  $('cameraBtn').disabled = false;
-  $('status').innerHTML = '';
-
-  if (!resp.ok) {
-    const t = await resp.text();
-    showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
-    return;
-  }
-
-  let result;
-  try { result = await resp.json(); }
-  catch { showError('Bad response from server.'); return; }
-
-  if (result.error) { showError(result.error); return; }
-
-  renderResult(result);
-  addToHistory(result);
-}
-
-// ===== Wire up =====
-// Barcode button now uses iOS native camera (one-shot) with multi-attempt decode.
-// IMPORTANT: reset input value after every change so iOS re-fires the event
-// next time even if it thinks "the same" file was picked.
-function bindFileInput(inputId, handler) {
-  $(inputId).addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    e.target.value = ''; // reset so next selection fires change again on iOS
-    if (file) handler(file);
-  });
-}
-
-$('barcodeBtn').addEventListener('click', () => $('barcodeInput').click());
+$('barcodeBtn').addEventListener('click', openBarcodeScanner);
+$('bcmCancel').addEventListener('click', closeBarcodeModal);
+$('bcmSnap').addEventListener('click', fallbackToPicture);
 $('cameraBtn').addEventListener('click', () => $('cameraInput').click());
 $('uploadBtn').addEventListener('click', () => $('uploadInput').click());
 
