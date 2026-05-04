@@ -691,8 +691,8 @@ async function tryDetectBarcode(imageElement) {
     const reader = new ZXing.BrowserMultiFormatReader(hints);
     const result = await reader.decodeFromImageElement(imageElement);
     if (result) {
-      const code = result.getText();
-      if (code && /^\d{6,14}$/.test(code)) return code;
+      const code = (result.getText() || '').trim();
+      if (code) return code;
     }
   } catch {
     // NotFoundException when no barcode in image — expected
@@ -945,13 +945,14 @@ function showError(msg) {
   $('error').innerHTML = `<div class="error">${escape(msg)}</div>`;
 }
 
-// ===== Live barcode scanner (uses ZXing-js, works in Safari) =====
+// ===== Live barcode scanner (ZXing-js) =====
 let zxingReader = null;
 let bcmActive = false;
+let bcmStream = null;
 
 async function openBarcodeScanner() {
   if (!window.ZXing) {
-    showError('Barcode library still loading. Wait 2 seconds and try again, or refresh.');
+    showError('Barcode library still loading. Wait a couple seconds and try again, or pull down to refresh.');
     return;
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -964,54 +965,87 @@ async function openBarcodeScanner() {
   $('bcmStatus').textContent = 'Starting camera…';
   bcmActive = true;
 
-  // ZXing's hints — restrict to 1D barcodes for speed and accuracy
-  const hints = new Map();
-  const formats = [
-    ZXing.BarcodeFormat.EAN_13,
-    ZXing.BarcodeFormat.EAN_8,
-    ZXing.BarcodeFormat.UPC_A,
-    ZXing.BarcodeFormat.UPC_E,
-    ZXing.BarcodeFormat.CODE_128,
-    ZXing.BarcodeFormat.CODE_39,
-    ZXing.BarcodeFormat.CODE_93,
-    ZXing.BarcodeFormat.ITF,
-  ];
-  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-
-  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 250);
-
+  // Step 1: explicit rear camera via getUserMedia
   try {
-    // undefined deviceId = use default rear camera (with environment facingMode hint)
-    await zxingReader.decodeFromConstraints(
-      { video: { facingMode: { ideal: 'environment' } } },
-      'bcmVideo',
-      (result, err) => {
-        if (!bcmActive) return;
-        if (result) {
-          const code = result.getText();
-          if (code && /^\d{6,14}$/.test(code)) {
-            if (navigator.vibrate) navigator.vibrate(80);
-            $('bcmStatus').textContent = 'Got it: ' + code;
-            stopBarcodeScanner();
-            $('barcodeModal').hidden = true;
-            handleBarcodeFound(code);
-          }
-        }
-        // err is most often "NotFoundException" between frames — ignore
-      }
-    );
-    $('bcmStatus').textContent = 'Point at a barcode';
+    bcmStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
   } catch (e) {
     closeBarcodeModal();
     const msg = e?.message || e?.name || String(e);
     if (/permission|denied|notallowed/i.test(msg)) {
-      showError('Camera permission denied. Settings → Safari → Camera → Allow.');
-    } else if (/notfound|notreadable/i.test(msg)) {
-      showError('No camera available on this device.');
+      showError('Camera permission denied. iOS: Settings → Safari → Camera → Allow.');
+    } else if (/notfound|notreadable|overconstrained/i.test(msg)) {
+      showError('No rear camera available.');
     } else {
-      showError('Camera/scanner error: ' + msg);
+      showError('Camera error: ' + msg);
     }
+    return;
+  }
+
+  // Step 2: attach stream to video and play
+  const video = $('bcmVideo');
+  video.srcObject = bcmStream;
+  video.setAttribute('playsinline', 'true');
+  video.muted = true;
+  try { await video.play(); } catch {}
+
+  // Wait for video to actually have dimensions
+  if (video.readyState < 2) {
+    await new Promise(resolve => {
+      video.addEventListener('loadeddata', resolve, { once: true });
+    });
+  }
+
+  $('bcmStatus').textContent = 'Hold steady over a barcode';
+
+  // Step 3: ZXing reader with format hints
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+    ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+    ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+    ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+    ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.ITF,
+  ]);
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 250);
+
+  // Step 4: continuous decode using decodeFromVideoElement (universal API)
+  let frameAttempts = 0;
+  const startTime = Date.now();
+
+  try {
+    zxingReader.decodeFromVideoElement(video, (result, err) => {
+      if (!bcmActive) return;
+
+      if (result) {
+        const code = (result.getText() || '').trim();
+        if (code) {
+          if (navigator.vibrate) navigator.vibrate(80);
+          $('bcmStatus').textContent = 'Got it: ' + code;
+          stopBarcodeScanner();
+          $('barcodeModal').hidden = true;
+          handleBarcodeFound(code);
+          return;
+        }
+      }
+
+      // NotFoundException is normal between frames — show progress
+      frameAttempts++;
+      if (frameAttempts % 8 === 0) {
+        const sec = Math.round((Date.now() - startTime) / 1000);
+        $('bcmStatus').textContent = `Scanning… (${sec}s) — try moving closer or steadier`;
+      }
+    });
+  } catch (e) {
+    closeBarcodeModal();
+    showError('Scanner setup failed: ' + (e?.message || e?.name || String(e)));
   }
 }
 
@@ -1021,14 +1055,12 @@ function stopBarcodeScanner() {
     try { zxingReader.reset(); } catch {}
     zxingReader = null;
   }
-  const v = $('bcmVideo');
-  if (v) {
-    try {
-      const stream = v.srcObject;
-      if (stream && stream.getTracks) stream.getTracks().forEach(t => t.stop());
-    } catch {}
-    v.srcObject = null;
+  if (bcmStream) {
+    try { bcmStream.getTracks().forEach(t => t.stop()); } catch {}
+    bcmStream = null;
   }
+  const v = $('bcmVideo');
+  if (v) v.srcObject = null;
 }
 
 function closeBarcodeModal() {
