@@ -804,7 +804,7 @@ async function tryDetectBarcode(imageFile) {
 }
 
 // ===== Open Food Facts lookup =====
-async function lookupBarcode(code) {
+async function offFetch(code) {
   const fields = 'product_name,brands,ingredients_text,allergens_tags,nova_group,nutriscore_grade,nutriments,serving_size,quantity';
   const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${fields}`;
   try {
@@ -829,6 +829,25 @@ async function lookupBarcode(code) {
   } catch {
     return null;
   }
+}
+
+async function lookupBarcode(code) {
+  // Try the code as-is first
+  let result = await offFetch(code);
+  if (result) return result;
+
+  // Try barcode-format variants (UPC-A is 12 digits, EAN-13 is 13 with a
+  // leading 0; OFF stores both forms inconsistently)
+  if (code.length === 12) {
+    result = await offFetch('0' + code);
+    if (result) return result;
+  } else if (code.length === 13 && code.startsWith('0')) {
+    result = await offFetch(code.slice(1));
+    if (result) return result;
+  }
+  // EAN-8 → no useful variant to try
+
+  return null;
 }
 
 // ===== Compress image. Also returns the source image element so we can run
@@ -1071,6 +1090,51 @@ async function robustDecode(file, onAttempt) {
   return null;
 }
 
+// Sends the photo straight to Claude for visual analysis when OFF doesn't
+// have the product. Reuses the standard /api/scan vision path.
+async function analyzePhotoDirectly(file) {
+  $('error').innerHTML = '';
+  $('barcodeBtn').disabled = true;
+  $('cameraBtn').disabled = true;
+
+  try {
+    const compressed = await compressImage(file);
+    const { dataUrl } = compressed;
+    const { mime, base64 } = dataUrlToParts(dataUrl);
+    const noteVal = ($('noteInput').value || '').trim();
+    const note = noteVal
+      ? noteVal + ' (barcode lookup failed; identify product visually)'
+      : 'Barcode lookup failed for this product. Identify what it is from the photo and verdict accordingly.';
+    const payload = { portion: currentPortion, note, image: base64, mime };
+
+    $('status').innerHTML = '<span class="spinner"></span>Analysing the photo with Claude';
+
+    const resp = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      const t = await resp.text();
+      showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
+      return;
+    }
+
+    const result = await resp.json();
+    if (result.error) { showError(result.error); return; }
+
+    renderResult(result);
+    addToHistory(result);
+  } catch (e) {
+    showError('Error: ' + (e?.message || e?.name || String(e)));
+  } finally {
+    $('barcodeBtn').disabled = false;
+    $('cameraBtn').disabled = false;
+    $('status').innerHTML = '';
+  }
+}
+
 // ===== Barcode-shot flow =====
 // User taps "Barcode" button → iOS opens native camera → user snaps the
 // barcode → we decode the resulting image.
@@ -1099,14 +1163,14 @@ async function handleBarcodeShot(file) {
   $('status').innerHTML = '';
 
   if (!code) {
-    showManualBarcodeEntry();
+    showManualBarcodeEntry(file);
     return;
   }
 
-  await processBarcodeCode(code);
+  await processBarcodeCode(code, file);
 }
 
-function showManualBarcodeEntry() {
+function showManualBarcodeEntry(originalFile) {
   $('result').innerHTML = `
     <div class="manual-entry">
       <div class="manual-entry-title">Couldn't read it automatically</div>
@@ -1128,7 +1192,7 @@ function showManualBarcodeEntry() {
       return;
     }
     $('result').innerHTML = '';
-    processBarcodeCode(code);
+    processBarcodeCode(code, originalFile);
   };
 
   $('manualLookupBtn').addEventListener('click', submit);
@@ -1137,7 +1201,7 @@ function showManualBarcodeEntry() {
   });
 }
 
-async function processBarcodeCode(code) {
+async function processBarcodeCode(code, photoFallback) {
   $('error').innerHTML = '';
   $('barcodeBtn').disabled = true;
   $('cameraBtn').disabled = true;
@@ -1146,7 +1210,17 @@ async function processBarcodeCode(code) {
   try {
     const productData = await lookupBarcode(code);
     if (!productData) {
-      showError('Product ' + code + ' not found in Open Food Facts. Double-check the digits, or this product may not be in the database. Use the Photo button to send the ingredient list directly.');
+      // Auto-fall-back to Claude vision on the original photo if we have one.
+      // OFF coverage is good but not exhaustive, especially for store-brands,
+      // multipacks, and regional SKUs.
+      if (photoFallback) {
+        $('status').innerHTML = '<span class="spinner"></span>Not in database · analysing your photo with Claude';
+        $('barcodeBtn').disabled = false;
+        $('cameraBtn').disabled = false;
+        await analyzePhotoDirectly(photoFallback);
+        return;
+      }
+      showError('Product ' + code + ' not in Open Food Facts. Double-check the digits, or use the Photo button to scan the label directly.');
       return;
     }
 
