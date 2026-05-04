@@ -172,11 +172,9 @@ export default async function handler(request) {
                 type: 'image',
                 source: { type: 'base64', media_type: mime, data: image },
               },
-              { type: 'text', text: userText },
+              { type: 'text', text: userText + '\n\nReply with the JSON object only. No prose, no markdown fences, no preamble.' },
             ],
           },
-          // Prefill to force JSON output
-          { role: 'assistant', content: '{' },
         ],
       }),
     });
@@ -197,18 +195,29 @@ export default async function handler(request) {
 
   const data = await claudeResp.json();
   const raw = data?.content?.[0]?.text ?? '';
-  // Reattach the prefill brace
-  const jsonText = '{' + raw;
+
+  // Robust JSON extraction. Handles: pure JSON, JSON wrapped in markdown
+  // fences (```json ... ```), or JSON with leading/trailing prose.
+  function extractJson(text) {
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (fenced) return fenced[1].trim();
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      return text.slice(start, end + 1);
+    }
+    return text.trim();
+  }
 
   let parsed;
   try {
-    parsed = JSON.parse(jsonText);
+    parsed = JSON.parse(extractJson(raw));
   } catch {
     parsed = {
       verdict: 'unclear',
       headline: 'Could not parse model response.',
       flags: [],
-      summary: jsonText.slice(0, 400),
+      summary: raw.slice(0, 400),
       alternative: '',
     };
   }
