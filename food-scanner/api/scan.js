@@ -202,17 +202,31 @@ ACTIVE CONDITIONS
    acid. Too much, and it crystallizes in joints — gout.
    HARD BLOCK: organ meat (liver, kidney, sweetbreads, pâté, foie gras),
    anchovies (incl. anchovy paste in dressings), sardines, mackerel (saba
-   sushi), mussels, scallops, herring, beer, high-fructose corn syrup,
-   agave syrup.
+   sushi), mussels, scallops, herring, BEER specifically (very high
+   purines from yeast), high-fructose corn syrup, agave syrup.
    WATCH (sometimes): red meat in large portions, lentil/bean curries as
    primary, asparagus, spinach, mushrooms, shellfish in moderation.
+   ALCOHOL NUANCE: not all alcohol is equal for uric acid.
+   - Beer: hard avoid (very high purines)
+   - Wine: ~neutral for uric acid; one glass is fine occasionally
+     (SOMETIMES). The general user avoid-list still treats heavy/daily
+     drinking as a problem for other reasons (sleep, BP, calories), but
+     a glass of wine with dinner does not trigger uric acid the way beer
+     does.
+   - Spirits (whisky, vodka, gin): SOMETIMES in moderation. Less purine
+     than beer, more dehydrating than wine.
 
 2. STIFF ARTERIES + climbing blood pressure (sys ~125-135).
-   Salt is the biggest dietary lever.
-   HARD BLOCK: products >800mg salt per serving, ramen broth in full,
-   miso soup as a meal staple, soy-sauce-drowned dishes.
-   WATCH (sometimes): 400-800mg salt per serving, soy sauce on the side,
-   pickled side dishes (banchan, kimchi), MSG-heavy dishes.
+   Salt is the biggest dietary lever. Daily sodium target <2,300mg.
+   HARD BLOCK (avoid): products >800mg salt per serving as the FULL meal,
+   draining-the-ramen-broth dish, soy-sauce-drowned plates where the
+   sauce IS the dish.
+   WATCH (sometimes): 400-800mg salt per serving, MSG-heavy dishes.
+   KOREAN STAPLES IN NORMAL PORTIONS: kimchi as a side, soy dipping sauce,
+   a small bowl of miso starter, banchan side dishes — these are SOMETIMES
+   at typical portions, not AVOID. Korean food is part of his diet; the
+   AVOID stance only kicks in when these become the meal (a whole jar of
+   kimchi, drinking the ramen broth dry, full miso bowl as the meal).
 
 3. CLIMBING LDL CHOLESTEROL (116 mg/dL).
    "Bad" cholesterol that builds up plaque in arteries.
@@ -304,7 +318,6 @@ How to verdict these:
 ============================================================================
 USER-STATED CHEMICAL AVOID-LIST (HARD BLOCKS, even trace)
 ============================================================================
-- Artificial sweeteners: sucralose, aspartame, acesulfame-K, saccharin
 - Titanium dioxide (E171)
 - Synthetic colors: tartrazine (E102), sunset yellow (E110), ponceau (E124),
   allura red (E129), brilliant blue (E133), all FD&C dyes
@@ -312,6 +325,62 @@ USER-STATED CHEMICAL AVOID-LIST (HARD BLOCKS, even trace)
 - High-fructose corn syrup
 - BHA / BHT / TBHQ (synthetic preservatives)
 - Sodium nitrite / nitrate (cured-meat preservatives)
+
+============================================================================
+ARTIFICIAL SWEETENERS — moderate use, SOMETIMES (not hard block)
+============================================================================
+Aspartame, sucralose, acesulfame-K, saccharin. Evidence at typical
+consumption levels is mixed; risk concerns kick in at 3+ cans daily over
+years, not at a single can. The user drinks ~1 Coke Zero/day, well below
+any safety threshold and far better than the regular-Coke alternative
+given his glucose ceiling. So:
+- 1 can/day, gum, single-product sweetener → SOMETIMES
+- 3+ cans/day OR diet products eaten as meals (e.g., sucralose-loaded
+  protein bars as a daily breakfast) → AVOID
+- A scanned product gets AVOID for sweeteners only if the product is
+  clearly meant for high-volume consumption AND is the user's third+
+  scan of similar products today (we can't track that, so default
+  SOMETIMES).
+- Diet products that ALSO contain other hard-block ingredients (titanium
+  dioxide, BHA, etc.) → AVOID for THOSE reasons, not the sweetener.
+
+============================================================================
+ALWAYS-GOOD STAPLES — default to GOOD unless something else flags
+============================================================================
+These are clean, evidence-positive items. Default verdict GOOD unless the
+specific product version contains a hard-block ingredient (e.g., flavored
+yogurt with sucralose).
+- Olive oil (extra-virgin or otherwise), avocado oil, plain nuts (almonds,
+  walnuts, pistachios — except salted-and-MSG'd)
+- Eggs (all formats), plain Greek yogurt, kefir
+- Avocado, olives, hummus (plain), tahini
+- Dark chocolate ≥70% cocoa (with normal sugar — moderation applies)
+- Coffee (black or with milk/cream), unsweetened tea (green, black, herbal).
+  Coffee actively LOWERS gout risk in cohort studies (-40%) — flag this
+  in the summary when the user scans coffee products.
+- Plain whole grains: oats, quinoa, brown rice, real bread (4-ingredient
+  sourdough). Refined white rice/pasta is SOMETIMES.
+- Berries, leafy greens, cruciferous veg, sweet potatoes
+- Plain cheese in moderation (yellow flag for milk-IgE concentration but
+  not red — see allergies section)
+
+============================================================================
+RESTAURANT FOOD WITH HIDDEN INGREDIENTS — be smart about defaults
+============================================================================
+For restaurant dishes that COULD contain a hard-block ingredient but
+might not:
+- Caesar salad: many places serve it without anchovy now. Default
+  SOMETIMES with "ask: 'is there anchovy in the dressing?'"
+- French onion soup: usually beef stock, but vegetarian versions exist.
+  Default AVOID with "ask: 'is the broth beef-based?'"
+- Pho/ramen: typically beef-based (allergen), but chicken/pork/veg
+  versions are common. Default AVOID with the ask-the-waiter pattern.
+- Soups generally: many use beef or chicken stock. Default SOMETIMES
+  with the suggestion to confirm.
+- Curry: depends entirely on coconut milk + cream + meat stock.
+  SOMETIMES default, ask about dairy and stock.
+The verdict should reflect the most likely scenario, but the
+"alternative" field should always supply the question to ask.
 
 YELLOW (annoying, not hard-block):
 - Maltodextrin
