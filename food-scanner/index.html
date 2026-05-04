@@ -945,34 +945,32 @@ function showError(msg) {
   $('error').innerHTML = `<div class="error">${escape(msg)}</div>`;
 }
 
-// ===== Live barcode scanner (ZXing-js) =====
+// ===== Live barcode scanner (ZXing-js, manual canvas loop) =====
 let zxingReader = null;
 let bcmActive = false;
 let bcmStream = null;
 
+function setStep(text) { $('bcmStatus').textContent = text; }
+
 async function openBarcodeScanner() {
   if (!window.ZXing) {
-    showError('Barcode library still loading. Wait a couple seconds and try again, or pull down to refresh.');
+    showError('Library not loaded yet. Wait 2-3 seconds and try again, or pull down to refresh.');
     return;
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError('Camera access not available in this browser. Use the Photo button instead.');
+    showError('Camera access not supported. Use the Photo button instead.');
     return;
   }
 
   $('error').innerHTML = '';
   $('barcodeModal').hidden = false;
-  $('bcmStatus').textContent = 'Starting camera…';
   bcmActive = true;
+  setStep('1/4 · Asking camera permission…');
 
-  // Step 1: explicit rear camera via getUserMedia
+  // Step 1: getUserMedia (rear camera, no resolution constraints to maximise compatibility)
   try {
     bcmStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
+      video: { facingMode: { ideal: 'environment' } },
       audio: false,
     });
   } catch (e) {
@@ -980,31 +978,49 @@ async function openBarcodeScanner() {
     const msg = e?.message || e?.name || String(e);
     if (/permission|denied|notallowed/i.test(msg)) {
       showError('Camera permission denied. iOS: Settings → Safari → Camera → Allow.');
-    } else if (/notfound|notreadable|overconstrained/i.test(msg)) {
-      showError('No rear camera available.');
     } else {
       showError('Camera error: ' + msg);
     }
     return;
   }
 
-  // Step 2: attach stream to video and play
+  // Step 2: attach stream to video element
+  setStep('2/4 · Loading camera feed…');
   const video = $('bcmVideo');
   video.srcObject = bcmStream;
   video.setAttribute('playsinline', 'true');
   video.muted = true;
-  try { await video.play(); } catch {}
 
-  // Wait for video to actually have dimensions
-  if (video.readyState < 2) {
-    await new Promise(resolve => {
-      video.addEventListener('loadeddata', resolve, { once: true });
+  try { await video.play(); }
+  catch (e) {
+    setStep('Video play blocked: ' + (e?.message || e?.name));
+    // Don't bail — try anyway
+  }
+
+  // Step 3: wait for actual dimensions
+  setStep('3/4 · Waiting for video dimensions…');
+  if (video.videoWidth === 0) {
+    await new Promise((resolve) => {
+      const onReady = () => {
+        if (video.videoWidth > 0) {
+          video.removeEventListener('loadeddata', onReady);
+          video.removeEventListener('canplay', onReady);
+          resolve();
+        }
+      };
+      video.addEventListener('loadeddata', onReady);
+      video.addEventListener('canplay', onReady);
+      setTimeout(resolve, 3000); // fallback
     });
   }
 
-  $('bcmStatus').textContent = 'Hold steady over a barcode';
+  if (video.videoWidth === 0) {
+    closeBarcodeModal();
+    showError('Video has no dimensions. Camera may be in use by another app. Force-close Safari and retry.');
+    return;
+  }
 
-  // Step 3: ZXing reader with format hints
+  // Step 4: build ZXing reader and start manual decode loop
   const hints = new Map();
   hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
     ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
@@ -1013,40 +1029,61 @@ async function openBarcodeScanner() {
     ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.ITF,
   ]);
   hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 200);
 
-  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 250);
+  if (typeof zxingReader.decodeFromCanvas !== 'function') {
+    closeBarcodeModal();
+    showError('Decoder version mismatch. Refresh page to re-download library.');
+    return;
+  }
 
-  // Step 4: continuous decode using decodeFromVideoElement (universal API)
-  let frameAttempts = 0;
+  setStep(`4/4 · Scanning ${video.videoWidth}×${video.videoHeight} · hold steady`);
+
+  // Manual canvas loop — most reliable across browsers
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  let attempts = 0;
   const startTime = Date.now();
 
-  try {
-    zxingReader.decodeFromVideoElement(video, (result, err) => {
-      if (!bcmActive) return;
+  function decodeFrame() {
+    if (!bcmActive) return;
 
+    if (video.videoWidth === 0 || video.paused) {
+      setTimeout(decodeFrame, 200);
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+
+    try {
+      const result = zxingReader.decodeFromCanvas(canvas);
       if (result) {
         const code = (result.getText() || '').trim();
         if (code) {
           if (navigator.vibrate) navigator.vibrate(80);
-          $('bcmStatus').textContent = 'Got it: ' + code;
+          setStep('Got it: ' + code);
           stopBarcodeScanner();
           $('barcodeModal').hidden = true;
           handleBarcodeFound(code);
           return;
         }
       }
+    } catch (e) {
+      // NotFoundException expected — barcode not in this frame
+    }
 
-      // NotFoundException is normal between frames — show progress
-      frameAttempts++;
-      if (frameAttempts % 8 === 0) {
-        const sec = Math.round((Date.now() - startTime) / 1000);
-        $('bcmStatus').textContent = `Scanning… (${sec}s) — try moving closer or steadier`;
-      }
-    });
-  } catch (e) {
-    closeBarcodeModal();
-    showError('Scanner setup failed: ' + (e?.message || e?.name || String(e)));
+    attempts++;
+    if (attempts % 6 === 0) {
+      const sec = Math.round((Date.now() - startTime) / 1000);
+      setStep(`Scanning · ${attempts} frames · ${sec}s · ${video.videoWidth}×${video.videoHeight}`);
+    }
+
+    if (bcmActive) setTimeout(decodeFrame, 150);
   }
+
+  decodeFrame();
 }
 
 function stopBarcodeScanner() {
