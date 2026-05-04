@@ -943,44 +943,81 @@ function relTime(t) {
   return new Date(t).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 }
 
-// ===== Robust file decode — try original, then a couple of resized versions =====
-async function downsizeToFile(file, maxDim) {
+// ===== Robust file decode =====
+// Loads an image with EXIF rotation respected (iOS photos often need this).
+async function loadImageBitmap(file) {
+  if (window.createImageBitmap) {
+    try {
+      return await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch {}
+  }
+  // Fallback: regular Image element (no EXIF rotation, but at least loads)
   const dataUrl = await new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result);
     r.onerror = reject;
     r.readAsDataURL(file);
   });
-  const img = await new Promise((resolve, reject) => {
+  return await new Promise((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
     i.onerror = reject;
     i.src = dataUrl;
   });
-  const ratio = Math.min(1, maxDim / Math.max(img.width, img.height));
-  const w = Math.round(img.width * ratio);
-  const h = Math.round(img.height * ratio);
-  const canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-  return await new Promise((resolve) => {
+}
+
+function canvasToFile(canvas, name = 'r.jpg') {
+  return new Promise((resolve) => {
     canvas.toBlob((blob) => {
       if (!blob) { resolve(null); return; }
-      resolve(new File([blob], 'r.jpg', { type: 'image/jpeg' }));
-    }, 'image/jpeg', 0.9);
+      resolve(new File([blob], name, { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.92);
   });
 }
 
-async function robustDecode(file) {
-  // Try in three forms — sometimes resolution affects decoding
-  const tries = [
-    file,
-    await downsizeToFile(file, 1280),
-    await downsizeToFile(file, 800),
-  ].filter(Boolean);
+async function downsizeToFile(file, maxDim) {
+  const img = await loadImageBitmap(file);
+  const w0 = img.width, h0 = img.height;
+  const ratio = Math.min(1, maxDim / Math.max(w0, h0));
+  const w = Math.round(w0 * ratio);
+  const h = Math.round(h0 * ratio);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  return await canvasToFile(canvas, 'd.jpg');
+}
 
-  for (const f of tries) {
-    const code = await tryDetectBarcode(f);
+async function rotateToFile(file, degrees) {
+  const img = await loadImageBitmap(file);
+  const w0 = img.width, h0 = img.height;
+  const canvas = document.createElement('canvas');
+  if (degrees === 90 || degrees === 270) {
+    canvas.width = h0; canvas.height = w0;
+  } else {
+    canvas.width = w0; canvas.height = h0;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((degrees * Math.PI) / 180);
+  ctx.drawImage(img, -w0 / 2, -h0 / 2);
+  return await canvasToFile(canvas, `r${degrees}.jpg`);
+}
+
+async function robustDecode(file, onAttempt) {
+  // Try in many forms — different libraries fail on different image conditions.
+  // Note: downsize functions already apply EXIF rotation via createImageBitmap.
+  const tries = [];
+  try { tries.push({ name: 'normalised', file: await downsizeToFile(file, 2000) }); } catch {}
+  try { tries.push({ name: '1280px', file: await downsizeToFile(file, 1280) }); } catch {}
+  try { tries.push({ name: '800px', file: await downsizeToFile(file, 800) }); } catch {}
+  try { tries.push({ name: '90°', file: await rotateToFile(file, 90) }); } catch {}
+  try { tries.push({ name: '270°', file: await rotateToFile(file, 270) }); } catch {}
+  tries.push({ name: 'original', file });
+
+  for (const t of tries) {
+    if (!t.file) continue;
+    if (onAttempt) onAttempt(t.name);
+    const code = await tryDetectBarcode(t.file);
     if (code) return code;
   }
   return null;
@@ -993,16 +1030,23 @@ async function handleBarcodeShot(file) {
   if (!file) return;
   $('error').innerHTML = '';
   $('result').innerHTML = '';
-  $('preview').innerHTML = '';
   $('barcodeBtn').disabled = true;
   $('cameraBtn').disabled = true;
+
+  // Show the captured photo immediately so the user can see what was shot.
+  // If decode fails, this helps them see whether the photo was framed/lit poorly.
+  const previewUrl = URL.createObjectURL(file);
+  $('preview').innerHTML = `<div class="preview"><img src="${previewUrl}"></div>`;
+
   $('status').innerHTML = '<span class="spinner"></span>Reading barcode from photo';
 
   try {
-    const code = await robustDecode(file);
+    const code = await robustDecode(file, (attemptName) => {
+      $('status').innerHTML = `<span class="spinner"></span>Trying ${attemptName}…`;
+    });
 
     if (!code) {
-      showError("Couldn't read a barcode in that photo. Try again with the barcode filling most of the frame, in good light. Or use the Photo button to send the ingredient list to Claude directly.");
+      showError("Couldn't read a barcode in that photo. Common fixes: hold the phone closer so the barcode fills most of the frame, ensure even light without glare, keep the barcode horizontal, hold steady. Or use the Photo button to send the ingredient list to Claude directly.");
       return;
     }
 
