@@ -267,6 +267,54 @@
   }
   .bcm-snap:active { transform: translateX(-50%) scale(0.96); }
 
+  /* Manual barcode entry fallback */
+  .manual-entry {
+    margin-top: 18px;
+    padding: 18px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--gold);
+    border-radius: 14px;
+  }
+  .manual-entry-title {
+    font-family: Georgia, serif;
+    font-size: 16px; font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .manual-entry-help {
+    font-size: 12px; color: var(--muted);
+    margin-bottom: 12px; line-height: 1.5;
+  }
+  .manual-entry-row {
+    display: flex; gap: 8px;
+  }
+  .manual-entry-row input {
+    flex: 1;
+    padding: 13px 14px;
+    background: var(--bg-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    font-size: 15px;
+    font-family: -apple-system, monospace;
+    letter-spacing: 0.06em;
+    -webkit-appearance: none;
+  }
+  .manual-entry-row input:focus { outline: none; border-color: var(--gold); }
+  .manual-entry-row button {
+    padding: 13px 18px;
+    background: var(--gold);
+    color: #14110d;
+    border: none;
+    border-radius: 11px;
+    font-size: 13px; font-weight: 700;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .manual-entry-row button:active { opacity: 0.85; }
+
   /* Barcode result preview card */
   .bc-card {
     margin-top: 14px;
@@ -1033,28 +1081,72 @@ async function handleBarcodeShot(file) {
   $('barcodeBtn').disabled = true;
   $('cameraBtn').disabled = true;
 
-  // Show the captured photo immediately so the user can see what was shot.
-  // If decode fails, this helps them see whether the photo was framed/lit poorly.
+  // Show the captured photo immediately so the user can see what was shot
   const previewUrl = URL.createObjectURL(file);
   $('preview').innerHTML = `<div class="preview"><img src="${previewUrl}"></div>`;
 
   $('status').innerHTML = '<span class="spinner"></span>Reading barcode from photo';
 
+  let code = null;
   try {
-    const code = await robustDecode(file, (attemptName) => {
+    code = await robustDecode(file, (attemptName) => {
       $('status').innerHTML = `<span class="spinner"></span>Trying ${attemptName}…`;
     });
+  } catch {}
 
-    if (!code) {
-      showError("Couldn't read a barcode in that photo. Common fixes: hold the phone closer so the barcode fills most of the frame, ensure even light without glare, keep the barcode horizontal, hold steady. Or use the Photo button to send the ingredient list to Claude directly.");
+  $('barcodeBtn').disabled = false;
+  $('cameraBtn').disabled = false;
+  $('status').innerHTML = '';
+
+  if (!code) {
+    showManualBarcodeEntry();
+    return;
+  }
+
+  await processBarcodeCode(code);
+}
+
+function showManualBarcodeEntry() {
+  $('result').innerHTML = `
+    <div class="manual-entry">
+      <div class="manual-entry-title">Couldn't read it automatically</div>
+      <div class="manual-entry-help">Look at the photo above and type the digits printed below the barcode (usually 8-13 numbers).</div>
+      <div class="manual-entry-row">
+        <input id="manualBarcode" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="14" placeholder="e.g. 5012345678901">
+        <button id="manualLookupBtn">Look up</button>
+      </div>
+    </div>
+  `;
+  const input = $('manualBarcode');
+  setTimeout(() => input.focus(), 50);
+
+  const submit = () => {
+    const code = (input.value || '').replace(/\D/g, '').trim();
+    if (code.length < 6) {
+      input.style.borderColor = 'var(--bad)';
+      setTimeout(() => { input.style.borderColor = ''; }, 1500);
       return;
     }
+    $('result').innerHTML = '';
+    processBarcodeCode(code);
+  };
 
-    $('status').innerHTML = '<span class="spinner"></span>Looking up product (' + escape(code) + ')';
+  $('manualLookupBtn').addEventListener('click', submit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit();
+  });
+}
 
+async function processBarcodeCode(code) {
+  $('error').innerHTML = '';
+  $('barcodeBtn').disabled = true;
+  $('cameraBtn').disabled = true;
+  $('status').innerHTML = '<span class="spinner"></span>Looking up product (' + escape(code) + ')';
+
+  try {
     const productData = await lookupBarcode(code);
     if (!productData) {
-      showError('Product ' + code + ' not found in Open Food Facts. Try the Photo button to scan the ingredient list.');
+      showError('Product ' + code + ' not found in Open Food Facts. Double-check the digits, or this product may not be in the database. Use the Photo button to send the ingredient list directly.');
       return;
     }
 
@@ -1094,7 +1186,6 @@ async function handleBarcodeShot(file) {
   } catch (e) {
     showError('Error: ' + (e?.message || e?.name || String(e)));
   } finally {
-    // Always re-enable, no matter what happened
     $('barcodeBtn').disabled = false;
     $('cameraBtn').disabled = false;
     $('status').innerHTML = '';
