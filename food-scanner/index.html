@@ -252,6 +252,20 @@
     border-radius: 12px;
     letter-spacing: 0.04em;
   }
+  .bcm-snap {
+    position: absolute;
+    left: 50%; transform: translateX(-50%);
+    bottom: calc(max(env(safe-area-inset-bottom), 24px) + 56px);
+    padding: 12px 22px;
+    background: var(--gold); color: #14110d;
+    border: none; border-radius: 999px;
+    font-size: 13px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(212,165,116,0.5);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bcm-snap:active { transform: translateX(-50%) scale(0.96); }
 
   /* Barcode result preview card */
   .bc-card {
@@ -668,6 +682,7 @@
     <div class="bcm-title">Scan barcode</div>
   </div>
   <div class="bcm-status" id="bcmStatus">Point camera at a barcode</div>
+  <button class="bcm-snap" id="bcmSnap" hidden>Tap to capture</button>
 </div>
 
 <script>
@@ -999,14 +1014,26 @@ async function openBarcodeScanner() {
   let attempts = 0;
   const startTime = Date.now();
 
+  // Compute a centered wide qrbox that matches the visual gold frame
+  function qrboxFn(viewW, viewH) {
+    const w = Math.min(Math.round(viewW * 0.78), 360);
+    const h = Math.round(w * 0.5); // wide rectangle (good for barcodes)
+    return { width: w, height: h };
+  }
+
   try {
     await html5Qr.start(
       { facingMode: 'environment' },
       {
-        fps: 10,
-        // qrbox undefined = decode the whole video frame; our gold frame is just visual
+        fps: 15,                    // more aggressive than default 10
+        qrbox: qrboxFn,             // restrict scan to centered wide area
         aspectRatio: undefined,
         disableFlip: true,
+        videoConstraints: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
       },
       (decodedText /*, decodedResult */) => {
         if (!bcmActive) return;
@@ -1023,9 +1050,14 @@ async function openBarcodeScanner() {
         // Per-frame "not found" — normal, throttle the status update
         if (!bcmActive) return;
         attempts++;
-        if (attempts % 12 === 0) {
+        if (attempts % 15 === 0) {
           const sec = Math.round((Date.now() - startTime) / 1000);
-          setStep(`Scanning · ${attempts} frames · ${sec}s · hold 10-15cm away`);
+          let tip = 'hold 10-15cm away';
+          if (sec > 8) tip = 'try better light or steadier grip';
+          if (sec > 15) tip = 'tap snapshot button for manual capture';
+          setStep(`Scanning · ${sec}s · ${tip}`);
+          // After 15s, show the manual capture fallback button
+          if (sec > 15) $('bcmSnap').hidden = false;
         }
       }
     );
@@ -1055,6 +1087,50 @@ async function stopBarcodeScanner() {
 async function closeBarcodeModal() {
   await stopBarcodeScanner();
   $('barcodeModal').hidden = true;
+  $('bcmSnap').hidden = true;
+}
+
+// Manual snapshot fallback — grab the current video frame and try harder
+async function manualSnapshot() {
+  if (!html5Qr) return;
+  setStep('Capturing frame…');
+
+  const videoEl = document.querySelector('#qrReader video');
+  if (!videoEl || videoEl.videoWidth === 0) {
+    setStep('No video to capture from.');
+    return;
+  }
+
+  // Grab the current frame to canvas → blob → File → scanFile
+  const canvas = document.createElement('canvas');
+  canvas.width = videoEl.videoWidth;
+  canvas.height = videoEl.videoHeight;
+  canvas.getContext('2d').drawImage(videoEl, 0, 0);
+
+  setStep('Decoding captured frame…');
+  await new Promise((resolve) => {
+    canvas.toBlob(async (blob) => {
+      if (!blob) { setStep('Capture failed.'); resolve(); return; }
+      const file = new File([blob], 'snap.jpg', { type: 'image/jpeg' });
+
+      // Pause the live scanner while we try a single hard decode
+      try { await html5Qr.pause(true); } catch {}
+
+      const code = await tryDetectBarcode(file);
+      if (code) {
+        if (navigator.vibrate) navigator.vibrate(80);
+        setStep('Got it: ' + code);
+        stopBarcodeScanner();
+        $('barcodeModal').hidden = true;
+        $('bcmSnap').hidden = true;
+        handleBarcodeFound(code);
+      } else {
+        setStep('Captured frame had no readable barcode. Try again.');
+        try { await html5Qr.resume(); } catch {}
+      }
+      resolve();
+    }, 'image/jpeg', 0.92);
+  });
 }
 
 async function handleBarcodeFound(code) {
@@ -1138,6 +1214,7 @@ async function handleBarcodeFound(code) {
 // ===== Wire up =====
 $('barcodeBtn').addEventListener('click', openBarcodeScanner);
 $('bcmCancel').addEventListener('click', closeBarcodeModal);
+$('bcmSnap').addEventListener('click', manualSnapshot);
 $('cameraBtn').addEventListener('click', () => $('cameraInput').click());
 $('uploadBtn').addEventListener('click', () => $('uploadInput').click());
 $('cameraInput').addEventListener('change', (e) => handleFile(e.target.files[0]));
