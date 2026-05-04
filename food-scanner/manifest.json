@@ -1,21 +1,21 @@
 {
-  "name": "Food scanner",
-  "short_name": "Scanner",
-  "description": "Personal food-label scanner with my health profile baked in.",
+  "name": "Verdict",
+  "short_name": "Verdict",
+  "description": "Personal food advisor. Scan a label or a plate, get a verdict tuned to your health profile.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#14110d",
+  "theme_color": "#14110d",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%230f172a'/><text x='96' y='138' font-size='118' text-anchor='middle' font-family='-apple-system'>🛒</text></svg>",
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><defs><radialGradient id='g' cx='50%25' cy='35%25'><stop offset='0%25' stop-color='%233d2f22'/><stop offset='100%25' stop-color='%2314110d'/></radialGradient></defs><rect width='192' height='192' rx='42' fill='url(%23g)'/><text x='96' y='126' font-size='118' text-anchor='middle' font-family='Georgia,serif' font-weight='bold' fill='%23f5e8d6'>V</text><circle cx='66' cy='158' r='6.5' fill='%235fa67c'/><circle cx='96' cy='158' r='6.5' fill='%23e9a44c'/><circle cx='126' cy='158' r='6.5' fill='%23e76f51'/></svg>",
       "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='112' fill='%230f172a'/><text x='256' y='372' font-size='320' text-anchor='middle' font-family='-apple-system'>🛒</text></svg>",
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><defs><radialGradient id='g' cx='50%25' cy='35%25'><stop offset='0%25' stop-color='%233d2f22'/><stop offset='100%25' stop-color='%2314110d'/></radialGradient></defs><rect width='512' height='512' rx='112' fill='url(%23g)'/><text x='256' y='340' font-size='320' text-anchor='middle' font-family='Georgia,serif' font-weight='bold' fill='%23f5e8d6'>V</text><circle cx='180' cy='420' r='17' fill='%235fa67c'/><circle cx='256' cy='420' r='17' fill='%23e9a44c'/><circle cx='332' cy='420' r='17' fill='%23e76f51'/></svg>",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
