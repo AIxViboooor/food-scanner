@@ -491,6 +491,34 @@
     font-size: 14px; line-height: 1.55; color: var(--text-2);
   }
 
+  /* Calories block */
+  .calories {
+    margin-top: 14px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(212,165,116,0.08), rgba(212,165,116,0.02));
+    border: 1px solid rgba(212,165,116,0.2);
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  .cal-value {
+    font-family: Georgia, serif; font-weight: 600;
+    font-size: 26px; color: var(--gold);
+    letter-spacing: -0.02em;
+  }
+  .cal-unit {
+    font-size: 13px; color: var(--muted);
+    margin-left: 2px; font-weight: 400;
+  }
+  .cal-per {
+    flex: 1; font-size: 12px; color: var(--muted);
+    line-height: 1.4;
+  }
+  .cal-confidence {
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--muted); margin-top: 2px;
+  }
+
   .flags { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
   .flag {
     display: flex; gap: 11px; align-items: flex-start;
@@ -581,6 +609,9 @@
   .history-proc.proc-minimal { color: #8db89c; }
   .history-proc.proc-processed { color: var(--gold); }
   .history-proc.proc-ultra { color: var(--bad); }
+  .history-cal {
+    color: var(--gold); font-weight: 500;
+  }
 
   /* Spinner */
   .spinner {
@@ -725,7 +756,7 @@ async function tryDetectBarcode(imageFile) {
 
 // ===== Open Food Facts lookup =====
 async function lookupBarcode(code) {
-  const fields = 'product_name,brands,ingredients_text,allergens_tags,nova_group,nutriscore_grade,nutriments';
+  const fields = 'product_name,brands,ingredients_text,allergens_tags,nova_group,nutriscore_grade,nutriments,serving_size,quantity';
   const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${fields}`;
   try {
     const r = await fetch(url);
@@ -743,6 +774,8 @@ async function lookupBarcode(code) {
       nova_group: p.nova_group || null,
       nutriscore: p.nutriscore_grade || null,
       nutriments: p.nutriments || null,
+      serving_size: p.serving_size || '',
+      quantity: p.quantity || '',
     };
   } catch {
     return null;
@@ -817,6 +850,21 @@ function renderResult(r) {
     ? `<div class="alternative"><span class="alternative-label">Suggestion</span>${escape(r.alternative)}</div>`
     : '';
 
+  let caloriesHtml = '';
+  const c = r.calories;
+  if (c && c.amount != null && c.confidence !== 'unknown') {
+    const prefix = c.confidence === 'estimate' ? '≈' : '';
+    const confLabel = c.confidence === 'estimate' ? 'Estimated' : 'From label';
+    caloriesHtml = `
+      <div class="calories">
+        <div>
+          <div class="cal-value">${prefix}${escape(String(c.amount))}<span class="cal-unit"> kcal</span></div>
+          <div class="cal-confidence">${confLabel}</div>
+        </div>
+        <div class="cal-per">${escape(c.per || '')}</div>
+      </div>`;
+  }
+
   const sourceBadge = r._source === 'barcode'
     ? `<span class="source-badge">Via barcode</span>` : '';
 
@@ -834,6 +882,7 @@ function renderResult(r) {
             <div class="headline">${escape(r.headline || '')}</div>
           </div>
         </div>
+        ${caloriesHtml}
         ${r.summary ? `<div class="summary">${escape(r.summary)}</div>` : ''}
         ${flagsHtml ? `<div class="flags">${flagsHtml}</div>` : ''}
         ${altHtml}
@@ -852,11 +901,15 @@ function saveHistory(arr) {
 }
 function addToHistory(result) {
   const hist = loadHistory();
+  const cal = result.calories;
   hist.unshift({
     t: Date.now(),
     verdict: result.verdict || 'unclear',
     processing: result.processing || 'unknown',
     headline: result.headline || '',
+    cal: (cal && cal.amount != null && cal.confidence !== 'unknown')
+      ? { amount: cal.amount, confidence: cal.confidence }
+      : null,
   });
   saveHistory(hist);
   renderHistory();
@@ -869,11 +922,14 @@ function renderHistory() {
   $('historyList').innerHTML = hist.map(h => {
     const procTag = h.processing && procShort[h.processing]
       ? `<span class="history-proc proc-${h.processing}">${procShort[h.processing]}</span>` : '';
+    const calTag = h.cal && h.cal.amount != null
+      ? `<span class="history-cal">${h.cal.confidence === 'estimate' ? '≈' : ''}${h.cal.amount} kcal</span>`
+      : '';
     return `<div class="history-row">
       <div class="history-dot ${h.verdict}"></div>
       <div class="history-text">
         <div class="history-headline">${escape(h.headline)}</div>
-        <div class="history-time">${relTime(h.t)}${procTag ? ' · ' + procTag : ''}</div>
+        <div class="history-time">${relTime(h.t)}${procTag ? ' · ' + procTag : ''}${calTag ? ' · ' + calTag : ''}</div>
       </div>
     </div>`;
   }).join('');
