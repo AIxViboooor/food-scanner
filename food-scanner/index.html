@@ -988,8 +988,7 @@ async function robustDecode(file) {
 
 // ===== Barcode-shot flow =====
 // User taps "Barcode" button → iOS opens native camera → user snaps the
-// barcode → we decode the resulting image. No live scanning, no camera
-// handles to leak between scans.
+// barcode → we decode the resulting image.
 async function handleBarcodeShot(file) {
   if (!file) return;
   $('error').innerHTML = '';
@@ -999,75 +998,63 @@ async function handleBarcodeShot(file) {
   $('cameraBtn').disabled = true;
   $('status').innerHTML = '<span class="spinner"></span>Reading barcode from photo';
 
-  const code = await robustDecode(file);
-
-  if (!code) {
-    $('barcodeBtn').disabled = false;
-    $('cameraBtn').disabled = false;
-    $('status').innerHTML = '';
-    showError('Couldn\'t read a barcode in that photo. Try again with the barcode filling more of the frame, in good light. Or use the Photo button to send the ingredient list to Claude directly.');
-    return;
-  }
-
-  $('status').innerHTML = '<span class="spinner"></span>Looking up product (' + escape(code) + ')';
-
-  const productData = await lookupBarcode(code);
-  if (!productData) {
-    $('barcodeBtn').disabled = false;
-    $('cameraBtn').disabled = false;
-    $('status').innerHTML = '';
-    showError('Product ' + code + ' not found in Open Food Facts. Try the Photo button to scan the ingredient list.');
-    return;
-  }
-
-  $('preview').innerHTML = `
-    <div class="bc-card">
-      <div class="bc-card-icon">
-        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><rect x="2" y="4" width="2" height="16"/><rect x="5" y="4" width="1" height="16"/><rect x="7" y="4" width="3" height="16"/><rect x="11" y="4" width="1" height="16"/><rect x="13" y="4" width="2" height="16"/><rect x="16" y="4" width="3" height="16"/><rect x="20" y="4" width="2" height="16"/></svg>
-      </div>
-      <div class="bc-card-text">
-        <div class="bc-card-name">${escape(productData.name || 'Unknown product')}</div>
-        <div class="bc-card-meta">${productData.brand ? escape(productData.brand) + ' · ' : ''}${escape(code)}</div>
-      </div>
-    </div>`;
-
-  $('status').innerHTML = '<span class="spinner"></span>Reading the ingredients';
-
-  const noteVal = ($('noteInput').value || '').trim();
-  const payload = { portion: currentPortion, note: noteVal, productData };
-
-  let resp;
   try {
-    resp = await fetch('/api/scan', {
+    const code = await robustDecode(file);
+
+    if (!code) {
+      showError("Couldn't read a barcode in that photo. Try again with the barcode filling most of the frame, in good light. Or use the Photo button to send the ingredient list to Claude directly.");
+      return;
+    }
+
+    $('status').innerHTML = '<span class="spinner"></span>Looking up product (' + escape(code) + ')';
+
+    const productData = await lookupBarcode(code);
+    if (!productData) {
+      showError('Product ' + code + ' not found in Open Food Facts. Try the Photo button to scan the ingredient list.');
+      return;
+    }
+
+    $('preview').innerHTML = `
+      <div class="bc-card">
+        <div class="bc-card-icon">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><rect x="2" y="4" width="2" height="16"/><rect x="5" y="4" width="1" height="16"/><rect x="7" y="4" width="3" height="16"/><rect x="11" y="4" width="1" height="16"/><rect x="13" y="4" width="2" height="16"/><rect x="16" y="4" width="3" height="16"/><rect x="20" y="4" width="2" height="16"/></svg>
+        </div>
+        <div class="bc-card-text">
+          <div class="bc-card-name">${escape(productData.name || 'Unknown product')}</div>
+          <div class="bc-card-meta">${productData.brand ? escape(productData.brand) + ' · ' : ''}${escape(code)}</div>
+        </div>
+      </div>`;
+
+    $('status').innerHTML = '<span class="spinner"></span>Reading the ingredients';
+
+    const noteVal = ($('noteInput').value || '').trim();
+    const payload = { portion: currentPortion, note: noteVal, productData };
+
+    const resp = await fetch('/api/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
+    if (!resp.ok) {
+      const t = await resp.text();
+      showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
+      return;
+    }
+
+    const result = await resp.json();
+    if (result.error) { showError(result.error); return; }
+
+    renderResult(result);
+    addToHistory(result);
   } catch (e) {
-    showError('Network error: ' + e.message);
-    $('barcodeBtn').disabled = false; $('cameraBtn').disabled = false;
+    showError('Error: ' + (e?.message || e?.name || String(e)));
+  } finally {
+    // Always re-enable, no matter what happened
+    $('barcodeBtn').disabled = false;
+    $('cameraBtn').disabled = false;
     $('status').innerHTML = '';
-    return;
   }
-
-  $('barcodeBtn').disabled = false;
-  $('cameraBtn').disabled = false;
-  $('status').innerHTML = '';
-
-  if (!resp.ok) {
-    const t = await resp.text();
-    showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
-    return;
-  }
-
-  let result;
-  try { result = await resp.json(); }
-  catch { showError('Bad response from server.'); return; }
-
-  if (result.error) { showError(result.error); return; }
-
-  renderResult(result);
-  addToHistory(result);
 }
 
 // ===== Scan flow =====
@@ -1075,77 +1062,62 @@ async function handleFile(file) {
   if (!file) return;
   $('error').innerHTML = '';
   $('result').innerHTML = '';
+  $('barcodeBtn').disabled = true;
   $('cameraBtn').disabled = true;
   $('status').innerHTML = '<span class="spinner"></span>Compressing image';
 
-  let compressed;
-  try { compressed = await compressImage(file); }
-  catch (e) {
-    showError('Could not read photo: ' + e.message);
-    $('cameraBtn').disabled = false; $('status').innerHTML = '';
-    return;
-  }
-  const { dataUrl, sourceImage } = compressed;
-  $('preview').innerHTML = `<div class="preview loading"><img src="${dataUrl}"></div>`;
-  const { mime, base64 } = dataUrlToParts(dataUrl);
-  const noteVal = ($('noteInput').value || '').trim();
-
-  // ===== Try barcode detection on the original file =====
-  $('status').innerHTML = '<span class="spinner"></span>Looking for a barcode';
-  let productData = null;
-  const barcode = await tryDetectBarcode(file);
-  if (barcode) {
-    $('status').innerHTML = '<span class="spinner"></span>Barcode found · looking up product';
-    productData = await lookupBarcode(barcode);
-  }
-
-  // ===== Build payload =====
-  const payload = { portion: currentPortion, note: noteVal };
-  if (productData) {
-    // Text-only path (cheap + fast)
-    payload.productData = productData;
-  } else {
-    // Image path (vision)
-    payload.image = base64;
-    payload.mime = mime;
-  }
-
-  $('status').innerHTML = productData
-    ? '<span class="spinner"></span>Reading ' + (productData.name || 'product')
-    : '<span class="spinner"></span>Reading the ingredients';
-
-  let resp;
   try {
-    resp = await fetch('/api/scan', {
+    const compressed = await compressImage(file);
+    const { dataUrl } = compressed;
+    $('preview').innerHTML = `<div class="preview loading"><img src="${dataUrl}"></div>`;
+    const { mime, base64 } = dataUrlToParts(dataUrl);
+    const noteVal = ($('noteInput').value || '').trim();
+
+    $('status').innerHTML = '<span class="spinner"></span>Looking for a barcode';
+    let productData = null;
+    const barcode = await tryDetectBarcode(file);
+    if (barcode) {
+      $('status').innerHTML = '<span class="spinner"></span>Barcode found · looking up product';
+      productData = await lookupBarcode(barcode);
+    }
+
+    const payload = { portion: currentPortion, note: noteVal };
+    if (productData) {
+      payload.productData = productData;
+    } else {
+      payload.image = base64;
+      payload.mime = mime;
+    }
+
+    $('status').innerHTML = productData
+      ? '<span class="spinner"></span>Reading ' + (productData.name || 'product')
+      : '<span class="spinner"></span>Reading the ingredients';
+
+    const resp = await fetch('/api/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
+    if (!resp.ok) {
+      const t = await resp.text();
+      showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
+      return;
+    }
+
+    const result = await resp.json();
+    if (result.error) { showError(result.error); return; }
+
+    renderResult(result);
+    addToHistory(result);
   } catch (e) {
-    showError('Network error: ' + e.message);
-    $('cameraBtn').disabled = false; $('status').innerHTML = '';
+    showError('Error: ' + (e?.message || e?.name || String(e)));
+  } finally {
+    $('barcodeBtn').disabled = false;
+    $('cameraBtn').disabled = false;
+    $('status').innerHTML = '';
     document.querySelector('.preview')?.classList.remove('loading');
-    return;
   }
-
-  $('cameraBtn').disabled = false;
-  $('status').innerHTML = '';
-  document.querySelector('.preview')?.classList.remove('loading');
-
-  if (!resp.ok) {
-    const t = await resp.text();
-    showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
-    return;
-  }
-
-  let result;
-  try { result = await resp.json(); }
-  catch { showError('Bad response from server.'); return; }
-
-  if (result.error) { showError(result.error); return; }
-
-  renderResult(result);
-  addToHistory(result);
 }
 
 function showError(msg) {
@@ -1450,13 +1422,24 @@ async function handleBarcodeFound(code) {
 }
 
 // ===== Wire up =====
-// Barcode button now uses iOS native camera (one-shot) with multi-attempt decode
+// Barcode button now uses iOS native camera (one-shot) with multi-attempt decode.
+// IMPORTANT: reset input value after every change so iOS re-fires the event
+// next time even if it thinks "the same" file was picked.
+function bindFileInput(inputId, handler) {
+  $(inputId).addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    e.target.value = ''; // reset so next selection fires change again on iOS
+    if (file) handler(file);
+  });
+}
+
 $('barcodeBtn').addEventListener('click', () => $('barcodeInput').click());
-$('barcodeInput').addEventListener('change', (e) => handleBarcodeShot(e.target.files[0]));
 $('cameraBtn').addEventListener('click', () => $('cameraInput').click());
 $('uploadBtn').addEventListener('click', () => $('uploadInput').click());
-$('cameraInput').addEventListener('change', (e) => handleFile(e.target.files[0]));
-$('uploadInput').addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+bindFileInput('barcodeInput', handleBarcodeShot);
+bindFileInput('cameraInput', handleFile);
+bindFileInput('uploadInput', handleFile);
 $('clearBtn').addEventListener('click', () => {
   if (confirm('Clear scan history?')) { saveHistory([]); renderHistory(); }
 });
