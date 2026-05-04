@@ -1,0 +1,10 @@
+{
+  "name": "food-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal food-label scanner. Vercel + Claude API + Basic Auth.",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  }
+}
