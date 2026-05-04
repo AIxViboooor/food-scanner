@@ -159,6 +159,72 @@
   .upload-row button:active { border-color: var(--gold); color: var(--text); }
   input[type="file"] { display: none; }
 
+  /* Portion + note row */
+  .opts {
+    margin-top: 18px;
+    padding: 14px;
+    background: rgba(255,255,255,0.015);
+    border: 1px solid var(--border-soft);
+    border-radius: 14px;
+  }
+  .opts-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .portion-row {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  }
+  .portion-btn {
+    padding: 8px 4px;
+    background: transparent;
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-size: 12px; font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .portion-btn:active { transform: scale(0.97); }
+  .portion-btn.active {
+    background: rgba(212,165,116,0.1);
+    border-color: var(--gold);
+    color: var(--text);
+  }
+  .note-toggle {
+    display: block;
+    margin-top: 12px;
+    background: none; border: none; padding: 0;
+    color: var(--muted); font-size: 12px;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .note-toggle:active { color: var(--gold); }
+  .note-input {
+    margin-top: 10px;
+    width: 100%; padding: 11px 13px;
+    background: var(--bg-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px; font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .note-input:focus { outline: none; border-color: var(--gold); }
+  .note-input::placeholder { color: var(--muted); }
+
+  /* Source badge in result */
+  .source-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-left: auto;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .source-badge::before {
+    content: ""; width: 4px; height: 4px; border-radius: 50%;
+    background: var(--gold);
+  }
+
   /* Status */
   .status {
     margin-top: 18px; text-align: center;
@@ -243,15 +309,30 @@
   }
 
   .verdict-text { flex: 1; min-width: 0; }
+  .verdict-meta {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
   .verdict-label {
     font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
     text-transform: uppercase;
-    margin-bottom: 4px;
   }
   .v-good .verdict-label { color: var(--good); }
   .v-sometimes .verdict-label { color: var(--warn); }
   .v-avoid .verdict-label { color: var(--bad); }
   .v-unclear .verdict-label { color: var(--muted); }
+
+  .proc-chip {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px; border-radius: 999px;
+    border: 1px solid;
+  }
+  .proc-whole { color: var(--good); border-color: rgba(95,166,124,0.4); background: rgba(95,166,124,0.08); }
+  .proc-minimal { color: #8db89c; border-color: rgba(141,184,156,0.35); background: rgba(141,184,156,0.06); }
+  .proc-processed { color: var(--gold); border-color: rgba(212,165,116,0.35); background: rgba(212,165,116,0.07); }
+  .proc-ultra { color: var(--bad); border-color: rgba(231,111,81,0.4); background: rgba(231,111,81,0.08); }
+  .proc-unknown { color: var(--muted); border-color: var(--border); }
   .headline {
     font-family: Georgia, serif;
     font-size: 22px; font-weight: 600; line-height: 1.25;
@@ -346,6 +427,14 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .history-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .history-proc {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .history-proc.proc-whole { color: var(--good); }
+  .history-proc.proc-minimal { color: #8db89c; }
+  .history-proc.proc-processed { color: var(--gold); }
+  .history-proc.proc-ultra { color: var(--bad); }
 
   /* Spinner */
   .spinner {
@@ -397,6 +486,18 @@
     <button id="uploadBtn">Choose from photos</button>
   </div>
 
+  <div class="opts">
+    <div class="opts-label">Portion</div>
+    <div class="portion-row" id="portionRow">
+      <button class="portion-btn" data-portion="small">Small</button>
+      <button class="portion-btn active" data-portion="medium">Medium</button>
+      <button class="portion-btn" data-portion="large">Large</button>
+      <button class="portion-btn" data-portion="whole">Whole pack</button>
+    </div>
+    <button class="note-toggle" id="noteToggle">+ Add context (optional)</button>
+    <input type="text" class="note-input" id="noteInput" placeholder="e.g. 'kalbi at Yori Korean BBQ'" hidden>
+  </div>
+
   <input type="file" id="cameraInput" accept="image/*" capture="environment">
   <input type="file" id="uploadInput" accept="image/*">
 
@@ -418,10 +519,64 @@
 
 <script>
 const HISTORY_KEY = 'foodScanner.history.v2';
+const PORTION_KEY = 'foodScanner.portion';
 const MAX_HISTORY = 25;
 const $ = (id) => document.getElementById(id);
 
-// ===== Compress image =====
+// Portion state
+let currentPortion = localStorage.getItem(PORTION_KEY) || 'medium';
+
+function setPortion(p) {
+  currentPortion = p;
+  localStorage.setItem(PORTION_KEY, p);
+  document.querySelectorAll('.portion-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.portion === p);
+  });
+}
+
+// ===== Barcode detection (native BarcodeDetector if available) =====
+async function tryDetectBarcode(imgOrCanvas) {
+  if (!('BarcodeDetector' in window)) return null;
+  try {
+    const detector = new window.BarcodeDetector({
+      formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'code_93', 'itf']
+    });
+    const codes = await detector.detect(imgOrCanvas);
+    if (codes && codes.length > 0) {
+      return codes[0].rawValue;
+    }
+  } catch {}
+  return null;
+}
+
+// ===== Open Food Facts lookup =====
+async function lookupBarcode(code) {
+  const fields = 'product_name,brands,ingredients_text,allergens_tags,nova_group,nutriscore_grade,nutriments';
+  const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${fields}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (data.status !== 1 || !data.product) return null;
+    const p = data.product;
+    if (!p.ingredients_text && !p.product_name) return null;
+    return {
+      barcode: code,
+      name: p.product_name || '',
+      brand: p.brands || '',
+      ingredients: p.ingredients_text || '',
+      allergens: (p.allergens_tags || []).map(t => t.replace(/^en:/, '')).join(', '),
+      nova_group: p.nova_group || null,
+      nutriscore: p.nutriscore_grade || null,
+      nutriments: p.nutriments || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ===== Compress image. Also returns the source image element so we can run
+// barcode detection on the original-resolution image (better detection rate).
 async function compressImage(file, maxDim = 1280, quality = 0.78) {
   const dataUrl = await new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -442,7 +597,7 @@ async function compressImage(file, maxDim = 1280, quality = 0.78) {
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, w, h);
-  return canvas.toDataURL('image/jpeg', quality);
+  return { dataUrl: canvas.toDataURL('image/jpeg', quality), sourceImage: img };
 }
 function dataUrlToParts(dataUrl) {
   const m = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
@@ -463,6 +618,19 @@ function renderResult(r) {
   const marks = { good: '✓', sometimes: '~', avoid: '✕', unclear: '?' };
   const labels = { good: 'Good for you', sometimes: 'Sometimes', avoid: 'Avoid', unclear: 'Unclear' };
 
+  const procLabels = {
+    whole: 'Whole food',
+    minimal: 'Minimally processed',
+    processed: 'Processed',
+    ultra: 'Ultra-processed',
+    unknown: '',
+  };
+  const proc = (r.processing || 'unknown').toLowerCase();
+  const procLabel = procLabels[proc] ?? '';
+  const procChipHtml = procLabel
+    ? `<span class="proc-chip proc-${proc}">${procLabel}</span>`
+    : '';
+
   const flagsHtml = (r.flags || []).map(f => {
     const lvl = (f.level || 'yellow').toLowerCase();
     return `<div class="flag flag-${lvl}">
@@ -475,13 +643,20 @@ function renderResult(r) {
     ? `<div class="alternative"><span class="alternative-label">Suggestion</span>${escape(r.alternative)}</div>`
     : '';
 
+  const sourceBadge = r._source === 'barcode'
+    ? `<span class="source-badge">Via barcode</span>` : '';
+
   $('result').innerHTML = `
     <div class="result-wrap">
       <div class="result ${cls}">
         <div class="verdict-row">
           <div class="verdict-mark">${marks[v] || '?'}</div>
           <div class="verdict-text">
-            <div class="verdict-label">${labels[v] || 'Unclear'}</div>
+            <div class="verdict-meta">
+              <span class="verdict-label">${labels[v] || 'Unclear'}</span>
+              ${procChipHtml}
+              ${sourceBadge}
+            </div>
             <div class="headline">${escape(r.headline || '')}</div>
           </div>
         </div>
@@ -506,6 +681,7 @@ function addToHistory(result) {
   hist.unshift({
     t: Date.now(),
     verdict: result.verdict || 'unclear',
+    processing: result.processing || 'unknown',
     headline: result.headline || '',
   });
   saveHistory(hist);
@@ -515,12 +691,15 @@ function renderHistory() {
   const hist = loadHistory();
   if (!hist.length) { $('historyWrap').style.display = 'none'; return; }
   $('historyWrap').style.display = 'block';
+  const procShort = { whole: 'Whole', minimal: 'Minimal', processed: 'Processed', ultra: 'Ultra-proc' };
   $('historyList').innerHTML = hist.map(h => {
+    const procTag = h.processing && procShort[h.processing]
+      ? `<span class="history-proc proc-${h.processing}">${procShort[h.processing]}</span>` : '';
     return `<div class="history-row">
       <div class="history-dot ${h.verdict}"></div>
       <div class="history-text">
         <div class="history-headline">${escape(h.headline)}</div>
-        <div class="history-time">${relTime(h.t)}</div>
+        <div class="history-time">${relTime(h.t)}${procTag ? ' · ' + procTag : ''}</div>
       </div>
     </div>`;
   }).join('');
@@ -548,18 +727,41 @@ async function handleFile(file) {
     $('cameraBtn').disabled = false; $('status').innerHTML = '';
     return;
   }
-  $('preview').innerHTML = `<div class="preview loading"><img src="${compressed}"></div>`;
+  const { dataUrl, sourceImage } = compressed;
+  $('preview').innerHTML = `<div class="preview loading"><img src="${dataUrl}"></div>`;
+  const { mime, base64 } = dataUrlToParts(dataUrl);
+  const noteVal = ($('noteInput').value || '').trim();
 
-  const { mime, base64 } = dataUrlToParts(compressed);
+  // ===== Try barcode detection on the original (un-compressed) image =====
+  $('status').innerHTML = '<span class="spinner"></span>Looking for a barcode';
+  let productData = null;
+  const barcode = await tryDetectBarcode(sourceImage);
+  if (barcode) {
+    $('status').innerHTML = '<span class="spinner"></span>Barcode found · looking up product';
+    productData = await lookupBarcode(barcode);
+  }
 
-  $('status').innerHTML = '<span class="spinner"></span>Reading the ingredients';
+  // ===== Build payload =====
+  const payload = { portion: currentPortion, note: noteVal };
+  if (productData) {
+    // Text-only path (cheap + fast)
+    payload.productData = productData;
+  } else {
+    // Image path (vision)
+    payload.image = base64;
+    payload.mime = mime;
+  }
+
+  $('status').innerHTML = productData
+    ? '<span class="spinner"></span>Reading ' + (productData.name || 'product')
+    : '<span class="spinner"></span>Reading the ingredients';
 
   let resp;
   try {
     resp = await fetch('/api/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: base64, mime }),
+      body: JSON.stringify(payload),
     });
   } catch (e) {
     showError('Network error: ' + e.message);
@@ -600,6 +802,27 @@ $('uploadInput').addEventListener('change', (e) => handleFile(e.target.files[0])
 $('clearBtn').addEventListener('click', () => {
   if (confirm('Clear scan history?')) { saveHistory([]); renderHistory(); }
 });
+
+// Portion buttons
+document.querySelectorAll('.portion-btn').forEach(btn => {
+  btn.addEventListener('click', () => setPortion(btn.dataset.portion));
+});
+setPortion(currentPortion); // restore from localStorage
+
+// Note toggle
+$('noteToggle').addEventListener('click', () => {
+  const input = $('noteInput');
+  const hidden = input.hidden;
+  input.hidden = !hidden;
+  if (!hidden) {
+    input.value = '';
+    $('noteToggle').textContent = '+ Add context (optional)';
+  } else {
+    $('noteToggle').textContent = '− Hide context';
+    setTimeout(() => input.focus(), 50);
+  }
+});
+
 renderHistory();
 </script>
 </body>
