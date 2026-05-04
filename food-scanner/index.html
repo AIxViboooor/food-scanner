@@ -986,8 +986,16 @@ async function openBarcodeScanner() {
 
   $('error').innerHTML = '';
   $('barcodeModal').hidden = false;
+  $('bcmSnap').hidden = true;
   bcmActive = true;
   setStep('1/3 · Loading scanner…');
+
+  // Make sure any previous scanner is fully cleaned up before starting fresh.
+  // html5-qrcode leaves orphan DOM and can hold a camera handle if not
+  // properly stopped — the most common cause of "works once" bugs.
+  await stopBarcodeScanner();
+  const container = $('qrReader');
+  if (container) container.innerHTML = '';
 
   try {
     html5Qr = new Html5Qrcode('qrReader', {
@@ -1008,6 +1016,8 @@ async function openBarcodeScanner() {
     showError('Setup error: ' + (e?.message || e?.name || String(e)));
     return;
   }
+  // Re-arm bcmActive after potential stop above
+  bcmActive = true;
 
   setStep('2/3 · Asking camera permission…');
 
@@ -1035,16 +1045,19 @@ async function openBarcodeScanner() {
           height: { ideal: 1080 },
         },
       },
-      (decodedText /*, decodedResult */) => {
+      async (decodedText /*, decodedResult */) => {
         if (!bcmActive) return;
         const code = (decodedText || '').trim();
-        if (code) {
-          if (navigator.vibrate) navigator.vibrate(80);
-          setStep('Got it: ' + code);
-          stopBarcodeScanner();
-          $('barcodeModal').hidden = true;
-          handleBarcodeFound(code);
-        }
+        if (!code) return;
+        bcmActive = false; // prevent further callbacks immediately
+        if (navigator.vibrate) navigator.vibrate(80);
+        setStep('Got it: ' + code);
+        // Properly await teardown so the camera + DOM is fully released
+        // before we try to reopen later.
+        await stopBarcodeScanner();
+        $('barcodeModal').hidden = true;
+        $('bcmSnap').hidden = true;
+        handleBarcodeFound(code);
       },
       (/* errorMessage */) => {
         // Per-frame "not found" — normal, throttle the status update
@@ -1078,7 +1091,15 @@ async function openBarcodeScanner() {
 async function stopBarcodeScanner() {
   bcmActive = false;
   if (html5Qr) {
-    try { await html5Qr.stop(); } catch {}
+    // Only stop if currently scanning or paused; calling stop on a
+    // not-started instance throws.
+    try {
+      const state = html5Qr.getState && html5Qr.getState();
+      // 2 = SCANNING, 3 = PAUSED. Other states don't need stop.
+      if (state === 2 || state === 3) {
+        await html5Qr.stop();
+      }
+    } catch {}
     try { html5Qr.clear(); } catch {}
     html5Qr = null;
   }
@@ -1118,9 +1139,10 @@ async function manualSnapshot() {
 
       const code = await tryDetectBarcode(file);
       if (code) {
+        bcmActive = false;
         if (navigator.vibrate) navigator.vibrate(80);
         setStep('Got it: ' + code);
-        stopBarcodeScanner();
+        await stopBarcodeScanner();
         $('barcodeModal').hidden = true;
         $('bcmSnap').hidden = true;
         handleBarcodeFound(code);
