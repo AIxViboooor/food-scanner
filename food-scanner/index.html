@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Verdict">
 <link rel="manifest" href="/manifest.json">
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <link rel="apple-touch-icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><defs><radialGradient id='g' cx='50%25' cy='35%25'><stop offset='0%25' stop-color='%233d2f22'/><stop offset='100%25' stop-color='%2314110d'/></radialGradient></defs><rect width='180' height='180' rx='42' fill='url(%23g)'/><text x='90' y='118' font-size='115' text-anchor='middle' font-family='Georgia,serif' font-weight='bold' fill='%23f5e8d6'>V</text><circle cx='62' cy='148' r='6' fill='%235fa67c'/><circle cx='90' cy='148' r='6' fill='%23e9a44c'/><circle cx='118' cy='148' r='6' fill='%23e76f51'/></svg>">
 <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%2314110d'/><text x='32' y='42' font-size='42' text-anchor='middle' font-family='Georgia,serif' font-weight='bold' fill='%23f5e8d6'>V</text><circle cx='22' cy='54' r='2.4' fill='%235fa67c'/><circle cx='32' cy='54' r='2.4' fill='%23e9a44c'/><circle cx='42' cy='54' r='2.4' fill='%23e76f51'/></svg>">
 <title>Verdict</title>
@@ -161,11 +161,21 @@
     background: #000;
   }
   .bcm[hidden] { display: none !important; }
-  .bcm-video {
+  .bcm-video, #qrReader {
     position: absolute; inset: 0;
     width: 100%; height: 100%;
-    object-fit: cover;
+    background: #000;
   }
+  /* html5-qrcode injects its own video element; force it to fill */
+  #qrReader video {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+  }
+  #qrReader > * { background: transparent !important; }
+  #qrReader__dashboard, #qrReader__scan_region img { display: none !important; }
   .bcm-mask {
     position: absolute; inset: 0;
     background: rgba(0, 0, 0, 0.45);
@@ -650,7 +660,7 @@
 
 <!-- Live barcode scanner modal -->
 <div class="bcm" id="barcodeModal" hidden>
-  <video class="bcm-video" id="bcmVideo" playsinline autoplay muted></video>
+  <div id="qrReader"></div>
   <div class="bcm-mask"></div>
   <div class="bcm-frame"><div class="bcm-line"></div></div>
   <div class="bcm-header">
@@ -677,27 +687,25 @@ function setPortion(p) {
   });
 }
 
-// ===== Post-photo barcode detection (ZXing) =====
-async function tryDetectBarcode(imageElement) {
-  if (!window.ZXing) return null;
+// ===== Post-photo barcode detection (html5-qrcode scanFile) =====
+async function tryDetectBarcode(imageFile) {
+  if (typeof Html5Qrcode === 'undefined' || !imageFile) return null;
+  // Need a temp container
+  const tempId = 'qrFileScanner_' + Date.now();
+  const tempDiv = document.createElement('div');
+  tempDiv.id = tempId;
+  tempDiv.style.display = 'none';
+  document.body.appendChild(tempDiv);
+  let result = null;
   try {
-    const hints = new Map();
-    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-      ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
-      ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.ITF,
-    ]);
-    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-    const reader = new ZXing.BrowserMultiFormatReader(hints);
-    const result = await reader.decodeFromImageElement(imageElement);
-    if (result) {
-      const code = (result.getText() || '').trim();
-      if (code) return code;
-    }
+    const tempScanner = new Html5Qrcode(tempId, { verbose: false });
+    const text = await tempScanner.scanFile(imageFile, false);
+    if (text) result = text.trim();
   } catch {
-    // NotFoundException when no barcode in image — expected
+    // No barcode found — expected for non-barcoded images
   }
-  return null;
+  try { tempDiv.remove(); } catch {}
+  return result;
 }
 
 // ===== Open Food Facts lookup =====
@@ -883,10 +891,10 @@ async function handleFile(file) {
   const { mime, base64 } = dataUrlToParts(dataUrl);
   const noteVal = ($('noteInput').value || '').trim();
 
-  // ===== Try barcode detection on the original (un-compressed) image =====
+  // ===== Try barcode detection on the original file =====
   $('status').innerHTML = '<span class="spinner"></span>Looking for a barcode';
   let productData = null;
-  const barcode = await tryDetectBarcode(sourceImage);
+  const barcode = await tryDetectBarcode(file);
   if (barcode) {
     $('status').innerHTML = '<span class="spinner"></span>Barcode found · looking up product';
     productData = await lookupBarcode(barcode);
@@ -945,163 +953,107 @@ function showError(msg) {
   $('error').innerHTML = `<div class="error">${escape(msg)}</div>`;
 }
 
-// ===== Live barcode scanner (ZXing-js, manual canvas loop) =====
-let zxingReader = null;
+// ===== Live barcode scanner (html5-qrcode) =====
+let html5Qr = null;
 let bcmActive = false;
-let bcmStream = null;
 
 function setStep(text) { $('bcmStatus').textContent = text; }
 
 async function openBarcodeScanner() {
-  if (!window.ZXing) {
-    showError('Library not loaded yet. Wait 2-3 seconds and try again, or pull down to refresh.');
+  if (typeof Html5Qrcode === 'undefined') {
+    showError('Library still loading. Wait 2-3 seconds and try again, or pull down to refresh.');
     return;
   }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError('Camera access not supported. Use the Photo button instead.');
+    showError('Camera access not supported in this browser.');
     return;
   }
 
   $('error').innerHTML = '';
   $('barcodeModal').hidden = false;
   bcmActive = true;
-  setStep('1/4 · Asking camera permission…');
+  setStep('1/3 · Loading scanner…');
 
-  // Step 1: getUserMedia (rear camera, no resolution constraints to maximise compatibility)
   try {
-    bcmStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false,
+    html5Qr = new Html5Qrcode('qrReader', {
+      verbose: false,
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.ITF,
+      ],
     });
   } catch (e) {
     closeBarcodeModal();
-    const msg = e?.message || e?.name || String(e);
-    if (/permission|denied|notallowed/i.test(msg)) {
-      showError('Camera permission denied. iOS: Settings → Safari → Camera → Allow.');
-    } else {
-      showError('Camera error: ' + msg);
-    }
+    showError('Setup error: ' + (e?.message || e?.name || String(e)));
     return;
   }
 
-  // Step 2: attach stream to video element
-  setStep('2/4 · Loading camera feed…');
-  const video = $('bcmVideo');
-  video.srcObject = bcmStream;
-  video.setAttribute('playsinline', 'true');
-  video.muted = true;
+  setStep('2/3 · Asking camera permission…');
 
-  try { await video.play(); }
-  catch (e) {
-    setStep('Video play blocked: ' + (e?.message || e?.name));
-    // Don't bail — try anyway
-  }
-
-  // Step 3: wait for actual dimensions
-  setStep('3/4 · Waiting for video dimensions…');
-  if (video.videoWidth === 0) {
-    await new Promise((resolve) => {
-      const onReady = () => {
-        if (video.videoWidth > 0) {
-          video.removeEventListener('loadeddata', onReady);
-          video.removeEventListener('canplay', onReady);
-          resolve();
-        }
-      };
-      video.addEventListener('loadeddata', onReady);
-      video.addEventListener('canplay', onReady);
-      setTimeout(resolve, 3000); // fallback
-    });
-  }
-
-  if (video.videoWidth === 0) {
-    closeBarcodeModal();
-    showError('Video has no dimensions. Camera may be in use by another app. Force-close Safari and retry.');
-    return;
-  }
-
-  // Step 4: build ZXing reader and start manual decode loop
-  const hints = new Map();
-  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-    ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-    ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
-    ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
-    ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.ITF,
-  ]);
-  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-  zxingReader = new ZXing.BrowserMultiFormatReader(hints, 200);
-
-  if (typeof zxingReader.decodeFromCanvas !== 'function') {
-    closeBarcodeModal();
-    showError('Decoder version mismatch. Refresh page to re-download library.');
-    return;
-  }
-
-  setStep(`4/4 · Scanning ${video.videoWidth}×${video.videoHeight} · hold steady`);
-
-  // Manual canvas loop — most reliable across browsers
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
   let attempts = 0;
   const startTime = Date.now();
 
-  function decodeFrame() {
-    if (!bcmActive) return;
-
-    if (video.videoWidth === 0 || video.paused) {
-      setTimeout(decodeFrame, 200);
-      return;
-    }
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
-
-    try {
-      const result = zxingReader.decodeFromCanvas(canvas);
-      if (result) {
-        const code = (result.getText() || '').trim();
+  try {
+    await html5Qr.start(
+      { facingMode: 'environment' },
+      {
+        fps: 10,
+        // qrbox undefined = decode the whole video frame; our gold frame is just visual
+        aspectRatio: undefined,
+        disableFlip: true,
+      },
+      (decodedText /*, decodedResult */) => {
+        if (!bcmActive) return;
+        const code = (decodedText || '').trim();
         if (code) {
           if (navigator.vibrate) navigator.vibrate(80);
           setStep('Got it: ' + code);
           stopBarcodeScanner();
           $('barcodeModal').hidden = true;
           handleBarcodeFound(code);
-          return;
+        }
+      },
+      (/* errorMessage */) => {
+        // Per-frame "not found" — normal, throttle the status update
+        if (!bcmActive) return;
+        attempts++;
+        if (attempts % 12 === 0) {
+          const sec = Math.round((Date.now() - startTime) / 1000);
+          setStep(`Scanning · ${attempts} frames · ${sec}s · hold 10-15cm away`);
         }
       }
-    } catch (e) {
-      // NotFoundException expected — barcode not in this frame
+    );
+    setStep('3/3 · Scanning · hold steady over the barcode');
+  } catch (e) {
+    closeBarcodeModal();
+    const msg = e?.message || e?.name || String(e);
+    if (/permission|denied|notallowed/i.test(msg)) {
+      showError('Camera permission denied. iOS: Settings → Safari → Camera → Allow.');
+    } else if (/notfound|notreadable/i.test(msg)) {
+      showError('No rear camera available.');
+    } else {
+      showError('Camera/scanner error: ' + msg);
     }
-
-    attempts++;
-    if (attempts % 6 === 0) {
-      const sec = Math.round((Date.now() - startTime) / 1000);
-      setStep(`Scanning · ${attempts} frames · ${sec}s · ${video.videoWidth}×${video.videoHeight}`);
-    }
-
-    if (bcmActive) setTimeout(decodeFrame, 150);
   }
-
-  decodeFrame();
 }
 
-function stopBarcodeScanner() {
+async function stopBarcodeScanner() {
   bcmActive = false;
-  if (zxingReader) {
-    try { zxingReader.reset(); } catch {}
-    zxingReader = null;
+  if (html5Qr) {
+    try { await html5Qr.stop(); } catch {}
+    try { html5Qr.clear(); } catch {}
+    html5Qr = null;
   }
-  if (bcmStream) {
-    try { bcmStream.getTracks().forEach(t => t.stop()); } catch {}
-    bcmStream = null;
-  }
-  const v = $('bcmVideo');
-  if (v) v.srcObject = null;
 }
 
-function closeBarcodeModal() {
-  stopBarcodeScanner();
+async function closeBarcodeModal() {
+  await stopBarcodeScanner();
   $('barcodeModal').hidden = true;
 }
 
