@@ -685,6 +685,7 @@
   </div>
 
   <input type="file" id="cameraInput" accept="image/*" capture="environment">
+  <input type="file" id="barcodeInput" accept="image/*" capture="environment">
   <input type="file" id="uploadInput" accept="image/*">
 
   <div class="status" id="status"></div>
@@ -940,6 +941,133 @@ function relTime(t) {
   if (d < 3600) return Math.round(d / 60) + ' min ago';
   if (d < 86400) return Math.round(d / 3600) + ' h ago';
   return new Date(t).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+// ===== Robust file decode — try original, then a couple of resized versions =====
+async function downsizeToFile(file, maxDim) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = dataUrl;
+  });
+  const ratio = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.round(img.width * ratio);
+  const h = Math.round(img.height * ratio);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  return await new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (!blob) { resolve(null); return; }
+      resolve(new File([blob], 'r.jpg', { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.9);
+  });
+}
+
+async function robustDecode(file) {
+  // Try in three forms — sometimes resolution affects decoding
+  const tries = [
+    file,
+    await downsizeToFile(file, 1280),
+    await downsizeToFile(file, 800),
+  ].filter(Boolean);
+
+  for (const f of tries) {
+    const code = await tryDetectBarcode(f);
+    if (code) return code;
+  }
+  return null;
+}
+
+// ===== Barcode-shot flow =====
+// User taps "Barcode" button → iOS opens native camera → user snaps the
+// barcode → we decode the resulting image. No live scanning, no camera
+// handles to leak between scans.
+async function handleBarcodeShot(file) {
+  if (!file) return;
+  $('error').innerHTML = '';
+  $('result').innerHTML = '';
+  $('preview').innerHTML = '';
+  $('barcodeBtn').disabled = true;
+  $('cameraBtn').disabled = true;
+  $('status').innerHTML = '<span class="spinner"></span>Reading barcode from photo';
+
+  const code = await robustDecode(file);
+
+  if (!code) {
+    $('barcodeBtn').disabled = false;
+    $('cameraBtn').disabled = false;
+    $('status').innerHTML = '';
+    showError('Couldn\'t read a barcode in that photo. Try again with the barcode filling more of the frame, in good light. Or use the Photo button to send the ingredient list to Claude directly.');
+    return;
+  }
+
+  $('status').innerHTML = '<span class="spinner"></span>Looking up product (' + escape(code) + ')';
+
+  const productData = await lookupBarcode(code);
+  if (!productData) {
+    $('barcodeBtn').disabled = false;
+    $('cameraBtn').disabled = false;
+    $('status').innerHTML = '';
+    showError('Product ' + code + ' not found in Open Food Facts. Try the Photo button to scan the ingredient list.');
+    return;
+  }
+
+  $('preview').innerHTML = `
+    <div class="bc-card">
+      <div class="bc-card-icon">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><rect x="2" y="4" width="2" height="16"/><rect x="5" y="4" width="1" height="16"/><rect x="7" y="4" width="3" height="16"/><rect x="11" y="4" width="1" height="16"/><rect x="13" y="4" width="2" height="16"/><rect x="16" y="4" width="3" height="16"/><rect x="20" y="4" width="2" height="16"/></svg>
+      </div>
+      <div class="bc-card-text">
+        <div class="bc-card-name">${escape(productData.name || 'Unknown product')}</div>
+        <div class="bc-card-meta">${productData.brand ? escape(productData.brand) + ' · ' : ''}${escape(code)}</div>
+      </div>
+    </div>`;
+
+  $('status').innerHTML = '<span class="spinner"></span>Reading the ingredients';
+
+  const noteVal = ($('noteInput').value || '').trim();
+  const payload = { portion: currentPortion, note: noteVal, productData };
+
+  let resp;
+  try {
+    resp = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    showError('Network error: ' + e.message);
+    $('barcodeBtn').disabled = false; $('cameraBtn').disabled = false;
+    $('status').innerHTML = '';
+    return;
+  }
+
+  $('barcodeBtn').disabled = false;
+  $('cameraBtn').disabled = false;
+  $('status').innerHTML = '';
+
+  if (!resp.ok) {
+    const t = await resp.text();
+    showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
+    return;
+  }
+
+  let result;
+  try { result = await resp.json(); }
+  catch { showError('Bad response from server.'); return; }
+
+  if (result.error) { showError(result.error); return; }
+
+  renderResult(result);
+  addToHistory(result);
 }
 
 // ===== Scan flow =====
@@ -1322,9 +1450,9 @@ async function handleBarcodeFound(code) {
 }
 
 // ===== Wire up =====
-$('barcodeBtn').addEventListener('click', openBarcodeScanner);
-$('bcmCancel').addEventListener('click', closeBarcodeModal);
-$('bcmSnap').addEventListener('click', manualSnapshot);
+// Barcode button now uses iOS native camera (one-shot) with multi-attempt decode
+$('barcodeBtn').addEventListener('click', () => $('barcodeInput').click());
+$('barcodeInput').addEventListener('change', (e) => handleBarcodeShot(e.target.files[0]));
 $('cameraBtn').addEventListener('click', () => $('cameraInput').click());
 $('uploadBtn').addEventListener('click', () => $('uploadInput').click());
 $('cameraInput').addEventListener('change', (e) => handleFile(e.target.files[0]));
