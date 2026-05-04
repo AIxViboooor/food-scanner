@@ -266,6 +266,42 @@ GENETIC NOTES
   acid where listed. Soft flag, not a block.
 
 ============================================================================
+USER'S CURRENT SUPPLEMENT STACK (deliberate interventions, not AVOID)
+============================================================================
+When the user scans a product that matches one of these, they're checking
+dosing or compatibility — they already take it on purpose. Treat as
+SOMETIMES or GOOD with context, NOT AVOID, even if an individual ingredient
+(e.g., sugar in cherry concentrate) would normally trigger a hard block at
+the labeled dose.
+
+Stack:
+- Nutrition Geeks Magnesium Glycinate 3-in-1 (~300mg elemental Mg/day)
+- Nutrition Geeks Turmeric + curcumin + ginger + black pepper
+- Nutrition Geeks Omega 3 (EPA 700 + DHA 500)
+- Nutrition Geeks Creatine monohydrate
+- Nutrition Geeks D3 4000 IU + K2 (MK-7) 100µg
+- H&B High Strength Co-Q10 100mg + B1
+- Optibac Every Day probiotic
+- Igennus Super B Complex (methylated — chosen for MTHFR C677T)
+- ON Gold Standard whey protein
+- Lamberts Vitamin C 500mg Time Release (uric acid intervention)
+- CherryActive Concentrate 946ml — therapeutic dose 30ml/day for
+  hyperuricemia. The sugar is intrinsic to tart cherry concentrate; the
+  Montmorency anthocyanins inhibit xanthine oxidase, which lowers uric
+  acid. Net positive for uric acid 8.1. Verdict at 30ml = SOMETIMES with
+  "this is your gout supplement" note. Liquid-sugar-as-hard-block rule
+  does NOT apply at this therapeutic dose. Larger portions (100ml+) =
+  AVOID is fine.
+- CherryActive Capsules — same intervention, travel format. GOOD.
+
+How to verdict these:
+- Calorie data still applies normally.
+- Acknowledge it's their stack: "this is your X supplement"
+- Suggest sticking to the labeled therapeutic dose.
+- Flag if portion is way above the therapeutic dose (e.g., user picked
+  "whole pack" for CherryActive Concentrate at 946ml = 30+ doses).
+
+============================================================================
 USER-STATED CHEMICAL AVOID-LIST (HARD BLOCKS, even trace)
 ============================================================================
 - Artificial sweeteners: sucralose, aspartame, acesulfame-K, saccharin
