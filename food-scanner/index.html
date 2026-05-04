@@ -1043,15 +1043,38 @@ async function openBarcodeScanner() {
   $('error').innerHTML = '';
   $('barcodeModal').hidden = false;
   $('bcmSnap').hidden = true;
-  bcmActive = true;
-  setStep('1/3 · Loading scanner…');
+  setStep('Resetting…');
 
-  // Make sure any previous scanner is fully cleaned up before starting fresh.
-  // html5-qrcode leaves orphan DOM and can hold a camera handle if not
-  // properly stopped — the most common cause of "works once" bugs.
-  await stopBarcodeScanner();
+  // === Aggressive cleanup of any previous scanner state ===
+  // iOS Safari is strict about camera handles; even after html5-qrcode's
+  // stop(), the underlying MediaStream can linger, blocking the next
+  // getUserMedia call. We kill every video track on the page to be safe.
+  bcmActive = false;
+  if (html5Qr) {
+    try {
+      const state = html5Qr.getState && html5Qr.getState();
+      if (state === 2 || state === 3) await html5Qr.stop();
+    } catch {}
+    try { html5Qr.clear(); } catch {}
+    html5Qr = null;
+  }
+  // Stop every active video track on the page (catches html5-qrcode leaks)
+  document.querySelectorAll('video').forEach((v) => {
+    try {
+      if (v.srcObject) {
+        v.srcObject.getTracks().forEach((t) => t.stop());
+        v.srcObject = null;
+      }
+    } catch {}
+  });
+  // Clear the container DOM completely
   const container = $('qrReader');
   if (container) container.innerHTML = '';
+  // Give iOS a beat to actually release the camera handle
+  await new Promise((r) => setTimeout(r, 350));
+
+  bcmActive = true;
+  setStep('1/3 · Loading scanner…');
 
   try {
     html5Qr = new Html5Qrcode('qrReader', {
@@ -1147,11 +1170,8 @@ async function openBarcodeScanner() {
 async function stopBarcodeScanner() {
   bcmActive = false;
   if (html5Qr) {
-    // Only stop if currently scanning or paused; calling stop on a
-    // not-started instance throws.
     try {
       const state = html5Qr.getState && html5Qr.getState();
-      // 2 = SCANNING, 3 = PAUSED. Other states don't need stop.
       if (state === 2 || state === 3) {
         await html5Qr.stop();
       }
@@ -1159,12 +1179,24 @@ async function stopBarcodeScanner() {
     try { html5Qr.clear(); } catch {}
     html5Qr = null;
   }
+  // Belt-and-braces: kill any video stream tracks the library missed.
+  document.querySelectorAll('video').forEach((v) => {
+    try {
+      if (v.srcObject) {
+        v.srcObject.getTracks().forEach((t) => t.stop());
+        v.srcObject = null;
+      }
+    } catch {}
+  });
 }
 
 async function closeBarcodeModal() {
   await stopBarcodeScanner();
   $('barcodeModal').hidden = true;
   $('bcmSnap').hidden = true;
+  // Clear the qrReader container DOM so next open is a clean slate
+  const container = $('qrReader');
+  if (container) container.innerHTML = '';
 }
 
 // Manual snapshot fallback — grab the current video frame and try harder
