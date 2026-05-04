@@ -128,6 +128,48 @@ HOW PROCESSING AFFECTS THE VERDICT
   long-term mortality cost. Mention this in the summary.
 
 ============================================================================
+CALORIES — always estimate when possible
+============================================================================
+Always populate the "calories" field. Three sources of data, in order of
+trust:
+
+1. BARCODE LOOKUP (OFF): use the kcal number provided in the nutriments.
+   - If kcal/serving is shown, use that, scale by the user's portion.
+   - Else use kcal/100g and estimate weight from product type and portion.
+   - Confidence: "exact".
+
+2. INGREDIENT LABEL VISIBLE in photo: read the nutrition panel directly.
+   - Apply the user's portion selection.
+   - Confidence: "exact".
+
+3. PLATED FOOD or label not visible: ESTIMATE.
+   - Identify dish, infer typical recipe calories.
+   - Adjust for visible portion size in photo + user's portion selection.
+   - Use real recipe density (pasta carbonara ~700-900 for a single plate,
+     grilled chicken + rice + veg ~600-750, bowl of cereal with milk ~200-
+     300, slice of pizza ~280, single chocolate biscuit ~80, etc.).
+   - Confidence: "estimate".
+
+Apply the user's portion selection (small/medium/large/whole):
+- "small" — half a labeled serving
+- "medium" — one labeled serving (default if unspecified)
+- "large" — 1.5-2 labeled servings
+- "whole" — the entire package or whole plate (compute total)
+
+Examples of how to populate:
+- A 30g serving of nuts (label says 175 kcal/serving), portion=medium:
+  { "amount": 175, "per": "per 30g serving", "confidence": "exact" }
+- Plate of pasta carbonara, portion=medium:
+  { "amount": 800, "per": "estimated for this plate", "confidence": "estimate" }
+- Whole 200g bag of crisps (label 530 kcal/100g), portion=whole:
+  { "amount": 1060, "per": "for the whole 200g bag", "confidence": "exact" }
+- Photo too unclear to identify or no label readable:
+  { "amount": null, "per": "", "confidence": "unknown" }
+
+Never refuse to estimate when the dish is clearly identifiable. A reasonable
+estimate is far more useful than a blank.
+
+============================================================================
 VERDICT PHILOSOPHY
 ============================================================================
 The user lives a normal life and eats normal food. Snacks and restaurants
@@ -270,6 +312,11 @@ OUTPUT FORMAT — return strict JSON only, no markdown, no preamble:
   "verdict": "good" | "sometimes" | "avoid",
   "processing": "whole" | "minimal" | "processed" | "ultra",
   "headline": "<one short sentence verdict in plain language — what to do>",
+  "calories": {
+    "amount": <integer or null>,
+    "per": "<short label like 'per 30g serving' or 'estimated for this plate'>",
+    "confidence": "exact" | "estimate" | "unknown"
+  },
   "flags": [
     { "level": "red" | "yellow" | "green", "ingredient": "<name in plain language>", "why": "<short, plain-language reason tied to user's body>" }
   ],
@@ -278,7 +325,7 @@ OUTPUT FORMAT — return strict JSON only, no markdown, no preamble:
 }
 
 If the image isn't readable, return:
-{ "verdict": "unclear", "processing": "unknown", "headline": "Can't make out the food clearly.", "flags": [], "summary": "Try a closer photo with better light.", "alternative": "" }
+{ "verdict": "unclear", "processing": "unknown", "headline": "Can't make out the food clearly.", "calories": { "amount": null, "per": "", "confidence": "unknown" }, "flags": [], "summary": "Try a closer photo with better light.", "alternative": "" }
 `;
 
 // Format incoming barcode/portion/note context as a structured prefix for
@@ -302,13 +349,19 @@ function buildContextText({ portion, note, productData }) {
     if (productData.nutriscore) {
       lines.push(`Nutri-Score (rough overall): ${productData.nutriscore.toUpperCase()}`);
     }
+    if (productData.serving_size) {
+      lines.push(`Serving size: ${productData.serving_size}`);
+    }
     if (productData.nutriments) {
       const n = productData.nutriments;
       const bits = [];
-      if (n['energy-kcal_100g']) bits.push(`${Math.round(n['energy-kcal_100g'])} kcal/100g`);
+      if (n['energy-kcal_serving'] != null) bits.push(`${Math.round(n['energy-kcal_serving'])} kcal/serving`);
+      if (n['energy-kcal_100g'] != null) bits.push(`${Math.round(n['energy-kcal_100g'])} kcal/100g`);
       if (n.sugars_100g != null) bits.push(`${n.sugars_100g}g sugar/100g`);
       if (n['saturated-fat_100g'] != null) bits.push(`${n['saturated-fat_100g']}g sat-fat/100g`);
       if (n.salt_100g != null) bits.push(`${n.salt_100g}g salt/100g`);
+      if (n.proteins_100g != null) bits.push(`${n.proteins_100g}g protein/100g`);
+      if (n.fiber_100g != null) bits.push(`${n.fiber_100g}g fiber/100g`);
       if (bits.length) lines.push(`Nutrition: ${bits.join(', ')}`);
     }
   }
@@ -423,6 +476,7 @@ export default async function handler(request) {
       verdict: 'unclear',
       processing: 'unknown',
       headline: 'Could not parse model response.',
+      calories: { amount: null, per: '', confidence: 'unknown' },
       flags: [],
       summary: raw.slice(0, 400),
       alternative: '',
