@@ -93,26 +93,26 @@
     text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;
   }
 
-  /* Scan grid — two side-by-side primary buttons */
+  /* Scan grid — three primary buttons */
   .scan-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
   }
   .scan-btn {
     position: relative;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    width: 100%; aspect-ratio: 1.05 / 1;
+    width: 100%; aspect-ratio: 0.95 / 1;
     background:
       radial-gradient(circle at 50% 35%, #3d2f22, #1f1812);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 24px;
-    font-family: Georgia, serif; font-size: 20px; font-weight: 600;
+    border-radius: 22px;
+    font-family: Georgia, serif; font-size: 17px; font-weight: 600;
     letter-spacing: -0.01em;
     cursor: pointer;
     overflow: hidden;
     transition: transform 0.15s, border-color 0.2s;
     -webkit-tap-highlight-color: transparent;
-    padding: 12px;
+    padding: 8px;
   }
   .scan-btn::before {
     content: "";
@@ -124,16 +124,16 @@
   .scan-btn:active { transform: scale(0.985); border-color: var(--gold); }
   .scan-btn:disabled { opacity: 0.5; cursor: wait; }
   .scan-icon {
-    width: 52px; height: 52px; border-radius: 50%;
+    width: 44px; height: 44px; border-radius: 50%;
     border: 1.5px solid var(--gold);
     display: flex; align-items: center; justify-content: center;
-    font-size: 22px; margin-bottom: 10px;
+    font-size: 19px; margin-bottom: 8px;
     background: rgba(212,165,116,0.05);
     position: relative;
     color: var(--gold);
     animation: idleBreath 4s ease-in-out infinite;
   }
-  .scan-icon svg { width: 26px; height: 26px; }
+  .scan-icon svg { width: 22px; height: 22px; }
   .scan-icon::after {
     content: "";
     position: absolute; inset: -5px;
@@ -150,9 +150,10 @@
   }
   .scan-sub {
     font-family: -apple-system, sans-serif;
-    font-size: 10px; font-weight: 400; color: var(--muted);
-    margin-top: 4px; text-transform: uppercase; letter-spacing: 0.12em;
+    font-size: 9px; font-weight: 400; color: var(--muted);
+    margin-top: 3px; text-transform: uppercase; letter-spacing: 0.1em;
     text-align: center;
+    line-height: 1.2;
   }
 
   /* Live barcode scanner modal */
@@ -314,6 +315,119 @@
     -webkit-tap-highlight-color: transparent;
   }
   .manual-entry-row button:active { opacity: 0.85; }
+
+  /* Menu mode results */
+  .menu-result {
+    margin-top: 22px;
+    animation: slideUp 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .menu-header {
+    margin-bottom: 14px;
+  }
+  .menu-type {
+    font-family: Georgia, serif;
+    font-size: 13px; color: var(--gold);
+    text-transform: uppercase; letter-spacing: 0.12em;
+    font-weight: 600;
+  }
+  .menu-section-h {
+    font-family: Georgia, serif;
+    font-size: 13px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    margin: 18px 0 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .menu-section-h.good { color: var(--good); }
+  .menu-section-h.bad { color: var(--bad); }
+  .menu-section-h::before {
+    content: ''; width: 18px; height: 1px;
+    background: currentColor; opacity: 0.6;
+  }
+  .menu-section-h::after {
+    content: ''; flex: 1; height: 1px;
+    background: currentColor; opacity: 0.15;
+  }
+  .menu-rec {
+    display: flex; gap: 12px;
+    padding: 14px;
+    background: var(--card); border: 1px solid var(--border);
+    border-left: 2px solid var(--good);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    animation: flagIn 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  }
+  .menu-rec:nth-child(1) { animation-delay: 0.05s; }
+  .menu-rec:nth-child(2) { animation-delay: 0.15s; }
+  .menu-rec:nth-child(3) { animation-delay: 0.25s; }
+  .rec-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(95,166,124,0.15); color: var(--good);
+    display: flex; align-items: center; justify-content: center;
+    font-family: Georgia, serif; font-weight: 700; font-size: 15px;
+    flex-shrink: 0;
+  }
+  .rec-body { flex: 1; min-width: 0; }
+  .rec-dish {
+    font-family: Georgia, serif;
+    font-size: 16px; font-weight: 600; color: var(--text);
+    margin-bottom: 4px;
+  }
+  .rec-why {
+    font-size: 13px; line-height: 1.5; color: var(--text-2);
+  }
+  .rec-ask {
+    margin-top: 8px;
+    padding: 8px 11px;
+    background: rgba(212,165,116,0.08);
+    border-left: 2px solid var(--gold);
+    border-radius: 6px;
+    font-family: Georgia, serif; font-style: italic;
+    font-size: 12px; color: var(--text-2);
+    line-height: 1.4;
+  }
+  .rec-ask::before {
+    content: 'Ask: '; font-style: normal; font-weight: 600;
+    color: var(--gold); text-transform: uppercase;
+    font-size: 10px; letter-spacing: 0.1em;
+  }
+
+  .menu-avoid-item {
+    padding: 11px 14px;
+    background: rgba(231,111,81,0.04);
+    border: 1px solid rgba(231,111,81,0.2);
+    border-left: 2px solid var(--bad);
+    border-radius: 10px;
+    margin-bottom: 6px;
+    animation: flagIn 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  }
+  .menu-avoid-item:nth-child(1) { animation-delay: 0.3s; }
+  .menu-avoid-item:nth-child(2) { animation-delay: 0.38s; }
+  .menu-avoid-item:nth-child(3) { animation-delay: 0.46s; }
+  .avoid-dish {
+    font-weight: 600; font-size: 13px; color: var(--text);
+    margin-bottom: 2px;
+  }
+  .avoid-why {
+    font-size: 12px; color: var(--muted); line-height: 1.4;
+  }
+
+  .menu-summary {
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: var(--card-2);
+    border-radius: 12px;
+    border: 1px solid var(--border-soft);
+    font-size: 13px; line-height: 1.55; color: var(--text-2);
+  }
+  .menu-summary::before {
+    content: 'Overall';
+    display: block;
+    font-family: -apple-system, sans-serif;
+    font-size: 10px; font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.16em;
+    margin-bottom: 6px;
+  }
 
   /* Barcode result preview card */
   .bc-card {
@@ -714,6 +828,13 @@
       <span>Photo</span>
       <span class="scan-sub">Label · Plate</span>
     </button>
+    <button id="menuBtn" class="scan-btn" aria-label="Scan menu">
+      <div class="scan-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="6" x2="19" y2="6"/><line x1="5" y1="10" x2="14" y2="10"/><line x1="5" y1="14" x2="19" y2="14"/><line x1="5" y1="18" x2="11" y2="18"/></svg>
+      </div>
+      <span>Menu</span>
+      <span class="scan-sub">Top 3 picks</span>
+    </button>
   </div>
 
   <div class="upload-row">
@@ -734,6 +855,7 @@
 
   <input type="file" id="cameraInput" accept="image/*" capture="environment">
   <input type="file" id="barcodeInput" accept="image/*" capture="environment">
+  <input type="file" id="menuInput" accept="image/*" capture="environment">
   <input type="file" id="uploadInput" accept="image/*">
 
   <div class="status" id="status"></div>
@@ -959,6 +1081,41 @@ function renderResult(r) {
   `;
 }
 
+// ===== Render menu mode result =====
+function renderMenuResult(r) {
+  const recs = Array.isArray(r.recommendations) ? r.recommendations : [];
+  const avoid = Array.isArray(r.avoid) ? r.avoid : [];
+
+  const recsHtml = recs.length
+    ? recs.map(rec => `
+      <div class="menu-rec">
+        <div class="rec-num">${escape(String(rec.rank || ''))}</div>
+        <div class="rec-body">
+          <div class="rec-dish">${escape(rec.dish || '')}</div>
+          <div class="rec-why">${escape(rec.why || '')}</div>
+          ${rec.ask_waiter ? `<div class="rec-ask">${escape(rec.ask_waiter)}</div>` : ''}
+        </div>
+      </div>`).join('')
+    : '';
+
+  const avoidHtml = avoid.length
+    ? avoid.map(a => `
+      <div class="menu-avoid-item">
+        <div class="avoid-dish">${escape(a.dish || '')}</div>
+        <div class="avoid-why">${escape(a.why || '')}</div>
+      </div>`).join('')
+    : '';
+
+  $('result').innerHTML = `
+    <div class="menu-result">
+      ${r.restaurant_type ? `<div class="menu-header"><div class="menu-type">${escape(r.restaurant_type)}</div></div>` : ''}
+      ${recsHtml ? `<div class="menu-section-h good">Best picks</div>${recsHtml}` : ''}
+      ${avoidHtml ? `<div class="menu-section-h bad">Skip these</div>${avoidHtml}` : ''}
+      ${r.summary ? `<div class="menu-summary">${escape(r.summary)}</div>` : ''}
+    </div>
+  `;
+}
+
 // ===== History =====
 function loadHistory() {
   try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); }
@@ -1088,6 +1245,65 @@ async function robustDecode(file, onAttempt) {
     if (code) return code;
   }
   return null;
+}
+
+// ===== Menu mode =====
+// User photographs a full restaurant menu. App returns top 3 picks +
+// top 3 to avoid based on the user's health profile.
+async function handleMenuShot(file) {
+  if (!file) return;
+  $('error').innerHTML = '';
+  $('result').innerHTML = '';
+  $('barcodeBtn').disabled = true;
+  $('cameraBtn').disabled = true;
+  $('menuBtn').disabled = true;
+
+  // Show the captured menu photo as preview
+  const previewUrl = URL.createObjectURL(file);
+  $('preview').innerHTML = `<div class="preview"><img src="${previewUrl}"></div>`;
+
+  $('status').innerHTML = '<span class="spinner"></span>Reading the menu';
+
+  try {
+    const compressed = await compressImage(file, 1600, 0.85);
+    const { dataUrl } = compressed;
+    const { mime, base64 } = dataUrlToParts(dataUrl);
+    const noteVal = ($('noteInput').value || '').trim();
+
+    const payload = {
+      mode: 'menu',
+      image: base64,
+      mime,
+      note: noteVal,
+    };
+
+    $('status').innerHTML = '<span class="spinner"></span>Picking the best 3 dishes for you';
+
+    const resp = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      const t = await resp.text();
+      showError('Server error (' + resp.status + '): ' + t.slice(0, 200));
+      return;
+    }
+
+    const result = await resp.json();
+    if (result.error) { showError(result.error); return; }
+
+    renderMenuResult(result);
+    // Don't add menu scans to history (they're not single-product verdicts)
+  } catch (e) {
+    showError('Error: ' + (e?.message || e?.name || String(e)));
+  } finally {
+    $('barcodeBtn').disabled = false;
+    $('cameraBtn').disabled = false;
+    $('menuBtn').disabled = false;
+    $('status').innerHTML = '';
+  }
 }
 
 // Sends the photo straight to Claude for visual analysis when OFF doesn't
@@ -1530,10 +1746,12 @@ $('barcodeBtn').addEventListener('click', openBarcodeScanner);
 $('bcmCancel').addEventListener('click', closeBarcodeModal);
 $('bcmSnap').addEventListener('click', fallbackToPicture);
 $('cameraBtn').addEventListener('click', () => $('cameraInput').click());
+$('menuBtn').addEventListener('click', () => $('menuInput').click());
 $('uploadBtn').addEventListener('click', () => $('uploadInput').click());
 
 bindFileInput('barcodeInput', handleBarcodeShot);
 bindFileInput('cameraInput', handleFile);
+bindFileInput('menuInput', handleMenuShot);
 bindFileInput('uploadInput', handleFile);
 $('clearBtn').addEventListener('click', () => {
   if (confirm('Clear scan history?')) { saveHistory([]); renderHistory(); }
