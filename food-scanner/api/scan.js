@@ -409,7 +409,7 @@ Be confident. Reserve AVOID for real hazards. Reserve GOOD for genuinely
 clean, real-food meals.
 `;
 
-const SYSTEM_PROMPT = HEALTH_PROFILE + `
+const SYSTEM_PROMPT_SINGLE = HEALTH_PROFILE + `
 
 OUTPUT FORMAT — return strict JSON only, no markdown, no preamble:
 
@@ -431,6 +431,102 @@ OUTPUT FORMAT — return strict JSON only, no markdown, no preamble:
 
 If the image isn't readable, return:
 { "verdict": "unclear", "processing": "unknown", "headline": "Can't make out the food clearly.", "calories": { "amount": null, "per": "", "confidence": "unknown" }, "flags": [], "summary": "Try a closer photo with better light.", "alternative": "" }
+`;
+
+// ============================================================================
+// MENU MODE — user photographs a full restaurant menu and gets ranked picks
+// ============================================================================
+const SYSTEM_PROMPT_MENU = HEALTH_PROFILE + `
+
+============================================================================
+MENU MODE INSTRUCTIONS
+============================================================================
+The user has photographed a restaurant menu. Your job:
+
+1. Identify the dishes visible on the menu. If the menu is partly cut off
+   or unreadable, still do your best with what you can see, and note in the
+   summary that you may have missed some items.
+
+2. Pick the TOP 3 best dishes for the user based on their full health
+   profile (above). Ranked 1-2-3 from best to also-good. Criteria:
+   - Whole-food-based, protein-adequate (40-60g+ for OMAD context)
+   - No hard-block ingredients (beef, cured meat, anchovies, beer, etc.)
+   - Low-moderate sodium
+   - Avoids his chemical avoid-list
+   - Realistic — pick dishes the user will actually enjoy, not just the
+     blandest options
+
+3. Pick the TOP 3 dishes to AVOID. Ranked by severity of risk. Criteria:
+   - Contains beef or beef stock (his IgE allergy)
+   - Contains cured/processed meat (CRC risk)
+   - Likely sugar-heavy liquid form (sodas, juices, sweetened drinks)
+   - Contains anchovies, sardines, mackerel as primary (gout)
+   - Has trans fats / deep-fried (LDL)
+   - Has obvious dairy concentrate if it's the dish's main component
+
+4. For each recommendation, include a brief "ask the waiter" question if
+   there's any uncertainty about hidden ingredients (broth, sauces, etc.).
+
+5. If NOTHING on the menu is genuinely GOOD, pick the 3 LEAST BAD options
+   and note this in the summary. Don't refuse to recommend.
+
+6. If EVERYTHING on the menu is good (rare, but possible at clean
+   restaurants), pick 3 favorites based on protein density and nutritional
+   profile.
+
+7. Identify the restaurant cuisine type if obvious (Italian, Korean,
+   Japanese, French, British pub, fast food, etc.) — useful context.
+
+OUTPUT FORMAT for menu mode — return strict JSON only, no markdown:
+
+{
+  "mode": "menu",
+  "restaurant_type": "<short cuisine label, e.g. 'Italian trattoria', 'Korean BBQ', 'British pub'>",
+  "recommendations": [
+    {
+      "rank": 1,
+      "dish": "<dish name as it appears on menu>",
+      "why": "<1-2 sentences in plain language: what's good about it for the user>",
+      "ask_waiter": "<short question to verify hidden ingredients, or empty string if no need>"
+    },
+    {
+      "rank": 2,
+      "dish": "...",
+      "why": "...",
+      "ask_waiter": "..."
+    },
+    {
+      "rank": 3,
+      "dish": "...",
+      "why": "...",
+      "ask_waiter": "..."
+    }
+  ],
+  "avoid": [
+    {
+      "dish": "<dish name>",
+      "why": "<short reason tied to user profile, plain language>"
+    },
+    {
+      "dish": "...",
+      "why": "..."
+    },
+    {
+      "dish": "...",
+      "why": "..."
+    }
+  ],
+  "summary": "<2-3 sentences: overall character of this menu for the user, e.g. 'cured-meat-heavy Italian menu, a few clean fish options, mostly carb-forward'>"
+}
+
+If menu unreadable:
+{
+  "mode": "menu",
+  "restaurant_type": "",
+  "recommendations": [],
+  "avoid": [],
+  "summary": "Can't read the menu clearly. Try a closer photo with better light, or take multiple photos for multi-page menus."
+}
 `;
 
 // Format incoming barcode/portion/note context as a structured prefix for
@@ -494,10 +590,17 @@ export default async function handler(request) {
     });
   }
 
-  const { image, mime = 'image/jpeg', note = '', portion = '', productData = null } = body;
+  const { image, mime = 'image/jpeg', note = '', portion = '', productData = null, mode = 'single' } = body;
 
   if (!image && !productData) {
     return new Response(JSON.stringify({ error: 'Missing image or productData' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (mode === 'menu' && !image) {
+    return new Response(JSON.stringify({ error: 'Menu mode requires an image' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
@@ -511,10 +614,17 @@ export default async function handler(request) {
     );
   }
 
+  const systemPrompt = mode === 'menu' ? SYSTEM_PROMPT_MENU : SYSTEM_PROMPT_SINGLE;
+
   const contextText = buildContextText({ portion, note, productData });
-  const baseInstruction = productData
-    ? 'Provide a verdict for this product based on the barcode-lookup data above.'
-    : 'Provide a verdict for the product or dish in the attached image.';
+  let baseInstruction;
+  if (mode === 'menu') {
+    baseInstruction = 'Analyse the restaurant menu in the attached image and pick the top 3 dishes for the user, plus top 3 to avoid.';
+  } else if (productData) {
+    baseInstruction = 'Provide a verdict for this product based on the barcode-lookup data above.';
+  } else {
+    baseInstruction = 'Provide a verdict for the product or dish in the attached image.';
+  }
 
   const userText = (contextText ? contextText + '\n\n' : '') + baseInstruction +
     '\n\nReply with the JSON object only. No prose, no markdown fences, no preamble.';
@@ -540,7 +650,7 @@ export default async function handler(request) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 1500,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt,
         messages: [{ role: 'user', content: messageContent }],
       }),
     });
@@ -577,19 +687,30 @@ export default async function handler(request) {
   try {
     parsed = JSON.parse(extractJson(raw));
   } catch {
-    parsed = {
-      verdict: 'unclear',
-      processing: 'unknown',
-      headline: 'Could not parse model response.',
-      calories: { amount: null, per: '', confidence: 'unknown' },
-      flags: [],
-      summary: raw.slice(0, 400),
-      alternative: '',
-    };
+    if (mode === 'menu') {
+      parsed = {
+        mode: 'menu',
+        restaurant_type: '',
+        recommendations: [],
+        avoid: [],
+        summary: 'Could not parse model response. ' + raw.slice(0, 300),
+      };
+    } else {
+      parsed = {
+        verdict: 'unclear',
+        processing: 'unknown',
+        headline: 'Could not parse model response.',
+        calories: { amount: null, per: '', confidence: 'unknown' },
+        flags: [],
+        summary: raw.slice(0, 400),
+        alternative: '',
+      };
+    }
   }
 
   // Tag the source so the UI can show a "via barcode" badge if it wants
-  parsed._source = productData ? 'barcode' : (image ? 'photo' : 'unknown');
+  parsed._source = productData ? 'barcode' : (mode === 'menu' ? 'menu' : (image ? 'photo' : 'unknown'));
+  parsed._mode = mode;
 
   return new Response(JSON.stringify(parsed), {
     headers: { 'Content-Type': 'application/json' },
